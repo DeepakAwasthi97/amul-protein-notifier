@@ -2,6 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from telegram import Bot
+from telegram.error import BadRequest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -13,23 +14,49 @@ import asyncio
 import time
 import logging
 
-# Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Output to console
-        logging.FileHandler('product_check.log')  # Output to a file
-    ]
-)
+# Ensure the log directory exists
+log_dir = os.path.dirname('product_check.log')
+if log_dir and not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+
+# Set up logging with error handling
+try:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),  # Output to console
+            logging.FileHandler('product_check.log')  # Output to a file
+        ]
+    )
+except Exception as e:
+    # Fallback to console logging if file logging fails
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()  # Output to console only
+        ]
+    )
+    logging.error("Failed to set up file logging: %s", str(e))
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Verify TELEGRAM_CHAT_ID:
+# - For a channel, it should be in the format -100XXXXXXXXXX (e.g., -1001234567890).
+# - Add the bot to the channel as an administrator with "Post Messages" permission.
+# - Use @getidsbot in the channel to get the correct chat ID.
 PINCODE = os.getenv("PINCODE")
-PRODUCT_NAMES = os.getenv("PRODUCT_NAMES").split(";")  # e.g., ["Amul High Protein Paneer, 400 g | Pack of 24", "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30"] or ["Any"]
+# Split on semicolons to handle product names with commas
+PRODUCT_NAMES = os.getenv("PRODUCT_NAMES").split(";")
+# Strip whitespace from each product name
+PRODUCT_NAMES = [name.strip() for name in PRODUCT_NAMES]
+logger.info("Loaded PRODUCT_NAMES: %s", PRODUCT_NAMES)
+logger.info("Loaded TELEGRAM_CHAT_ID: %s", TELEGRAM_CHAT_ID)
 
 # Initialize Telegram bot
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -37,15 +64,20 @@ bot = Bot(token=TELEGRAM_BOT_TOKEN)
 def check_product_availability():
     url = "https://shop.amul.com/en/browse/protein"
     
-    # Set up Selenium WebDriver
+    # Set up Selenium WebDriver with headless Chromium
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")  # Uncomment for headless mode after testing
+    options.add_argument("--headless=new")  # Enable headless mode
+    options.add_argument("--no-sandbox")  # Required for GitHub Actions
+    options.add_argument("--disable-dev-shm-usage")  # Avoid shared memory issues
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
+    # Specify the path to Chromium binary if needed (Snap installs it in a non-standard location)
+    options.binary_location = "/snap/bin/chromium"
     driver = webdriver.Chrome(options=options)
     
     try:
-        driver.maximize_window()
         logger.info("Navigating to URL: %s", url)
+        driver.maximize_window()  # Maximize window for better visibility
+        logger.info("Opening the Amul Protein page...")
         driver.get(url)
         
         # Enter PINCODE
@@ -216,14 +248,11 @@ async def send_telegram_notification(products):
             # If all products are "Sold Out", send the special message
             message = f"None of the Amul Protein items are available for your PINCODE: {PINCODE}"
             logger.info("All products are Sold Out, sending notification: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-        else:
-            # Notify about all "In Stock" products
-            message = f"Available Amul Protein Products for PINCODE {PINCODE}:\n\n"
-            for name, _ in in_stock_products:
-                message += f"- {name}\n"
-            logger.info("Sending Telegram notification for available products: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            try:
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            except BadRequest as e:
+                logger.error("Failed to send Telegram notification: %s", str(e))
+                raise
     else:
         # If checking specific products, notify only for those that are "In Stock"
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
@@ -234,7 +263,14 @@ async def send_telegram_notification(products):
             for name, _ in in_stock_products:
                 message += f"- {name}\n"
             logger.info("Sending Telegram notification for available products: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            # Additional log to confirm message content
+            logger.info("Message length: %d characters", len(message))
+            logger.info("Message is empty: %s", not bool(message.strip()))
+            try:
+                await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            except BadRequest as e:
+                logger.error("Failed to send Telegram notification: %s", str(e))
+                raise
         else:
             logger.info("No 'In Stock' products to notify about.")
 
