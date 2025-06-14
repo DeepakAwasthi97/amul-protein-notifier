@@ -3,7 +3,7 @@ name: Amul Protein Notifier
 on:
   # Trigger the workflow on a schedule (e.g., every 5 minutes)
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes
+    - cron: '*/13 * * * *'  # Runs every 5 minutes
   # Trigger the workflow on push to the main branch
   push:
     branches:
@@ -35,32 +35,22 @@ jobs:
       # Step 4: Install Chrome and ChromeDriver (required for Selenium)
       - name: Install Chrome and ChromeDriver
         run: |
-          # Install dependencies for snap
+          # Install Chromium using snap
           sudo apt-get update
           sudo apt-get install -y snapd
-
-          # Install Chromium using snap
           sudo snap install chromium
 
-          # Install ChromeDriver by downloading it directly
-          # First, find the version of Chromium installed
-          CHROMIUM_VERSION=$(chromium --version | grep -oP 'Chromium \K\d+')
-          echo "Chromium version: $CHROMIUM_VERSION"
+          # Verify Chromium installation
+          chromium --version
 
-          # Download the matching ChromeDriver version
-          CHROMEDRIVER_URL="https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROMIUM_VERSION}"
-          CHROMEDRIVER_VERSION=$(curl -sS $CHROMEDRIVER_URL)
+          # Install a specific, known version of ChromeDriver
+          CHROMEDRIVER_VERSION="137.0.7151.68"
           echo "Downloading ChromeDriver version: $CHROMEDRIVER_VERSION"
-
-          # Download and unzip ChromeDriver
-          # Remove any existing chromedriver to avoid conflicts
-          sudo rm -f /usr/bin/chromedriver
           wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
           sudo unzip /tmp/chromedriver.zip chromedriver -d /usr/bin/
           sudo chmod +x /usr/bin/chromedriver
 
-          # Verify installations
-          chromium --version
+          # Verify ChromeDriver installation
           chromedriver --version
 
       # Step 5: Run the script with environment variables
