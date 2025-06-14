@@ -1,0 +1,56 @@
+name: Amul Protein Notifier
+
+on:
+  # Trigger the workflow on a schedule (e.g., every hour)
+  schedule:
+    - cron: '*/5 * * * *'  # Runs every 5 minutes
+  # Trigger the workflow on push to the main branch
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  check-products:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Step 3: Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install python-dotenv requests beautifulsoup4 telegram selenium
+
+      # Step 4: Install Chrome and ChromeDriver (required for Selenium)
+      - name: Install Chrome and ChromeDriver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          sudo apt-get install -y chromium-chromedriver
+          sudo ln -s /usr/lib/chromium-browser/chromedriver /usr/bin/chromedriver
+          chromedriver --version
+
+      # Step 5: Run the script with environment variables
+      - name: Run Amul Protein Notifier
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          PINCODE: ${{ secrets.PINCODE }}
+          PRODUCT_NAMES: ${{ secrets.PRODUCT_NAMES }}
+        run: python main.py
+      
+      - name: Upload logs
+        if: always()  # Run even if previous steps fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-check-logs
+          path: product_check.log
+      
