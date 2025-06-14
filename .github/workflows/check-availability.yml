@@ -44,7 +44,7 @@ jobs:
           chromium --version
 
           # Install a specific, known version of ChromeDriver
-          CHROMEDRIVER_VERSION="137.0.7151.68"
+          CHROMEDRIVER_VERSION="136.0.7103.113"
           echo "Downloading ChromeDriver version: $CHROMEDRIVER_VERSION"
           wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
           sudo unzip /tmp/chromedriver.zip chromedriver -d /usr/bin/
