@@ -3,7 +3,7 @@ name: Amul Protein Notifier
 on:
   # Trigger the workflow on a schedule (e.g., every 5 minutes)
   schedule:
-    - cron: '*/13 * * * *'  # Runs every 5 minutes
+    - cron: '*/5 * * * *'  # Runs every 5 minutes
   # Trigger the workflow on push to the main branch
   push:
     branches:
@@ -43,11 +43,12 @@ jobs:
           # Verify Chromium installation
           chromium --version
 
-          # Install a specific, known version of ChromeDriver
-          CHROMEDRIVER_VERSION="136.0.7103.113"
+          # Install ChromeDriver from the new Chrome for Testing URL
+          CHROMEDRIVER_VERSION="137.0.7151.103"
           echo "Downloading ChromeDriver version: $CHROMEDRIVER_VERSION"
-          wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
-          sudo unzip /tmp/chromedriver.zip chromedriver -d /usr/bin/
+          wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip"
+          sudo unzip /tmp/chromedriver.zip chromedriver-linux64/chromedriver -d /usr/bin/
+          sudo mv /usr/bin/chromedriver-linux64/chromedriver /usr/bin/chromedriver
           sudo chmod +x /usr/bin/chromedriver
 
           # Verify ChromeDriver installation
