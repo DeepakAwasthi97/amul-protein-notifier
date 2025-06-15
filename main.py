@@ -174,48 +174,36 @@ def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
     
     # Set up Chrome options
-    options = Options()
+    options = webdriver.ChromeOptions()
     options.add_argument("--headless")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--disable-logging")
-    options.add_argument("--disable-background-timer-throttling")
-    options.add_argument("--disable-backgrounding-occluded-windows")
-    options.add_argument("--disable-renderer-backgrounding")
-    options.add_argument("--disable-features=TranslateUI")
-    options.add_argument("--disable-web-security")
-    options.add_argument("--disable-features=VizDisplayCompositor")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.69 Safari/537.36")
     
     # Configure based on environment
-    if os.getenv("GITHUB_ACTIONS"):
-        options.binary_location = "/usr/bin/chrome"
-        options.add_argument("--single-process")
-        options.add_argument("--disable-background-networking")
-        options.add_argument("--disable-default-apps")
-        options.add_argument("--disable-sync")
-        options.add_argument("--memory-pressure-off")
-        options.add_argument("--max_old_space_size=4096")
-        logger.info("Running in GitHub Actions environment")
+    # if os.getenv("GITHUB_ACTIONS"):
+    #     options.binary_location = "/usr/bin/chrome"
+    #     options.add_argument("--single-process")
+    #     options.add_argument("--disable-background-networking")
+    #     options.add_argument("--disable-default-apps")
+    #     options.add_argument("--disable-sync")
+    #     options.add_argument("--memory-pressure-off")
+    #     options.add_argument("--max_old_space_size=4096")
+    #     logger.info("Running in GitHub Actions environment")
         
         # Use Chrome Service for better control
-        service = Service("/usr/bin/chromedriver")
-    else:
-        options.binary_location = "/snap/bin/chromium"
+        # service = Service("/usr/bin/chromedriver")
+    # else:
+    #     options.binary_location = "/snap/bin/chromium"
         # Only use user-data-dir for local development
-        import uuid
-        unique_id = str(uuid.uuid4())
-        user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
-        options.add_argument(f"--user-data-dir={user_data_dir}")
-        logger.info("Using temporary user data directory: %s", user_data_dir)
-        service = Service()  # Use default chromedriver path
+        # unique_id = str(uuid.uuid4())
+        # user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
+        # options.add_argument(f"--user-data-dir={user_data_dir}")
+        # logger.info("Using temporary user data directory: %s", user_data_dir)
+        # service = Service()  # Use default chromedriver path
     
-    driver = None
+    # driver = None
     try:
         logger.info("Initializing Chrome WebDriver with Service...")
-        driver = webdriver.Chrome(service=service, options=options)
+        driver = webdriver.Chrome(options=options)
         logger.info("Chrome WebDriver initialized successfully")
         
         # Set window size for consistent behavior
