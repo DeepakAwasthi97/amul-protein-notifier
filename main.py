@@ -173,35 +173,36 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
     
-    # Set up Selenium WebDriver
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")  # Run in headless mode for GitHub Actions
+    # Set up Chrome options
+    options = Options()
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-extensions")
+    options.add_argument("--disable-logging")
     options.add_argument("--disable-background-timer-throttling")
     options.add_argument("--disable-backgrounding-occluded-windows")
     options.add_argument("--disable-renderer-backgrounding")
     options.add_argument("--disable-features=TranslateUI")
-    options.add_argument("--disable-ipc-flooding-protection")
     options.add_argument("--disable-web-security")
     options.add_argument("--disable-features=VizDisplayCompositor")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.69 Safari/537.36")
     
-    # Use the correct binary path for Chrome in GitHub Actions
+    # Configure based on environment
     if os.getenv("GITHUB_ACTIONS"):
         options.binary_location = "/usr/bin/chrome"
-        # Add additional GitHub Actions specific options
         options.add_argument("--single-process")
         options.add_argument("--disable-background-networking")
         options.add_argument("--disable-default-apps")
         options.add_argument("--disable-sync")
-        options.add_argument("--disable-plugins")
-        # Don't use user-data-dir in GitHub Actions
-        logger.info("Running in GitHub Actions - not using user-data-dir")
+        options.add_argument("--memory-pressure-off")
+        options.add_argument("--max_old_space_size=4096")
+        logger.info("Running in GitHub Actions environment")
+        
+        # Use Chrome Service for better control
+        service = Service("/usr/bin/chromedriver")
     else:
-        # Use snap path for local testing if applicable
         options.binary_location = "/snap/bin/chromium"
         # Only use user-data-dir for local development
         import uuid
@@ -209,20 +210,28 @@ def check_product_availability(pincode):
         user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
         options.add_argument(f"--user-data-dir={user_data_dir}")
         logger.info("Using temporary user data directory: %s", user_data_dir)
+        service = Service()  # Use default chromedriver path
     
     driver = None
     try:
-        logger.info("Initializing Chrome WebDriver...")
-        driver = webdriver.Chrome(options=options)
+        logger.info("Initializing Chrome WebDriver with Service...")
+        driver = webdriver.Chrome(service=service, options=options)
         logger.info("Chrome WebDriver initialized successfully")
         
-        driver.maximize_window()
+        # Set window size for consistent behavior
+        driver.set_window_size(1920, 1080)
         logger.info("Navigating to URL: %s", url)
         driver.get(url)
         
+        # Wait for page to load
+        WebDriverWait(driver, 15).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        logger.info("Page loaded completely")
+        
         try:
             logger.info("Locating PINCODE input field...")
-            pincode_input = WebDriverWait(driver, 10).until(
+            pincode_input = WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.XPATH, '//*[@id="search"]'))
             )
             logger.info("PINCODE input field found. Entering PINCODE: %s", pincode)
@@ -230,9 +239,13 @@ def check_product_availability(pincode):
             pincode_input.send_keys(pincode)
             logger.info("PINCODE entered successfully.")
             
+            # Wait a bit for the dropdown to appear
+            import time
+            time.sleep(2)
+            
             logger.info("Waiting for PINCODE dropdown to appear...")
             try:
-                WebDriverWait(driver, 10).until(
+                WebDriverWait(driver, 15).until(
                     EC.presence_of_element_located((By.ID, "automatic"))
                 )
                 logger.info("Parent container '#automatic' found.")
@@ -240,44 +253,46 @@ def check_product_availability(pincode):
                 max_attempts = 3
                 for attempt in range(max_attempts):
                     try:
-                        dropdown_button = WebDriverWait(driver, 10).until(
+                        dropdown_button = WebDriverWait(driver, 15).until(
                             EC.element_to_be_clickable((By.XPATH, '//*[@id="automatic"]/div[2]/a'))
                         )
                         logger.info("Dropdown element found on attempt %d.", attempt + 1)
 
                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown_button)
+                        time.sleep(1)  # Wait for scroll to complete
                         logger.info("Scrolled to dropdown element.")
 
                         logger.info("Dropdown - Is displayed: %s", dropdown_button.is_displayed())
                         logger.info("Dropdown - Is enabled: %s", dropdown_button.is_enabled())
-                        logger.info("Dropdown - Element tag: %s", dropdown_button.tag_name)
                         logger.info("Dropdown - Element text: %s", dropdown_button.text)
-                        logger.info("Dropdown - Element HTML: %s", driver.execute_script("return arguments[0].outerHTML;", dropdown_button))
 
-                        logger.info("Attempt %d: Clicking dropdown with ActionChains...", attempt + 1)
-                        ActionChains(driver).move_to_element(dropdown_button).click().perform()
-
-                        WebDriverWait(driver, 5).until(
-                            EC.staleness_of(dropdown_button)
-                        )
-                        logger.info("Dropdown clicked successfully and disappeared!")
-                        break
+                        logger.info("Attempt %d: Clicking dropdown with JavaScript...", attempt + 1)
+                        driver.execute_script("arguments[0].click();", dropdown_button)
+                        
+                        # Wait for the dropdown to disappear or page to change
+                        try:
+                            WebDriverWait(driver, 10).until(
+                                EC.staleness_of(dropdown_button)
+                            )
+                            logger.info("Dropdown clicked successfully and page changed!")
+                            break
+                        except TimeoutException:
+                            # Alternative: check if page has changed by looking for products
+                            try:
+                                WebDriverWait(driver, 5).until(
+                                    EC.presence_of_element_located((By.CSS_SELECTOR, ".product-grid-item"))
+                                )
+                                logger.info("Products loaded - dropdown click was successful!")
+                                break
+                            except TimeoutException:
+                                logger.warning("Attempt %d: Click may not have registered, retrying...", attempt + 1)
+                                continue
 
                     except StaleElementReferenceException:
                         logger.warning("Attempt %d: Stale element detected, retrying...", attempt + 1)
                         continue
-                    except ElementClickInterceptedException:
-                        logger.warning("Attempt %d: Click intercepted, trying JavaScript click...", attempt + 1)
-                        driver.execute_script("arguments[0].click();", dropdown_button)
-                        logger.info("JavaScript click executed.")
-                        WebDriverWait(driver, 5).until(
-                            EC.staleness_of(dropdown_button)
-                        )
-                        logger.info("Dropdown clicked successfully via JavaScript!")
-                        break
-                    except TimeoutException as te:
-                        logger.error("Timeout during click verification: %s", str(te))
-                        driver.save_screenshot(f"pincode_timeout_attempt_{attempt + 1}.png")
+                    except Exception as e:
+                        logger.error("Attempt %d: Unexpected error: %s", attempt + 1, str(e))
                         continue
 
                 else:
@@ -300,7 +315,7 @@ def check_product_availability(pincode):
             return []
         
         logger.info("Waiting for product list to load after PINCODE confirmation...")
-        WebDriverWait(driver, 10).until(
+        WebDriverWait(driver, 15).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".product-grid-item"))
         )
         logger.info("Product list loaded after PINCODE confirmation.")
@@ -343,6 +358,11 @@ def check_product_availability(pincode):
     
     except Exception as e:
         logger.error("Error initializing or using Chrome WebDriver: %s", str(e))
+        if driver:
+            try:
+                driver.save_screenshot("chrome_error.png")
+            except:
+                pass
         return []
     
     finally:
