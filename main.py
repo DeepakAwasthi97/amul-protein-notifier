@@ -13,6 +13,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException, StaleElementReferenceException
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 import logging
 import asyncio
@@ -168,14 +170,8 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Failed to stop notifications. Please try again.")
 
 # Product checking function
-
 def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
-    
-    # Create a unique temporary directory for Chrome's user data
-    unique_id = str(uuid.uuid4())
-    user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
-    logger.info("Using temporary user data directory: %s", user_data_dir)
     
     # Set up Selenium WebDriver
     options = webdriver.ChromeOptions()
@@ -191,8 +187,6 @@ def check_product_availability(pincode):
     options.add_argument("--disable-ipc-flooding-protection")
     options.add_argument("--disable-web-security")
     options.add_argument("--disable-features=VizDisplayCompositor")
-    options.add_argument("--remote-debugging-port=9222")
-    options.add_argument(f"--user-data-dir={user_data_dir}")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.69 Safari/537.36")
     
     # Use the correct binary path for Chrome in GitHub Actions
@@ -203,9 +197,18 @@ def check_product_availability(pincode):
         options.add_argument("--disable-background-networking")
         options.add_argument("--disable-default-apps")
         options.add_argument("--disable-sync")
+        options.add_argument("--disable-plugins")
+        # Don't use user-data-dir in GitHub Actions
+        logger.info("Running in GitHub Actions - not using user-data-dir")
     else:
         # Use snap path for local testing if applicable
         options.binary_location = "/snap/bin/chromium"
+        # Only use user-data-dir for local development
+        import uuid
+        unique_id = str(uuid.uuid4())
+        user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
+        options.add_argument(f"--user-data-dir={user_data_dir}")
+        logger.info("Using temporary user data directory: %s", user_data_dir)
     
     driver = None
     try:
@@ -350,13 +353,14 @@ def check_product_availability(pincode):
             except Exception as e:
                 logger.warning("Error while quitting driver: %s", str(e))
         
-        # Clean up the temporary user data directory
-        try:
-            if os.path.exists(user_data_dir):
-                shutil.rmtree(user_data_dir)
-                logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
-        except Exception as e:
-            logger.warning("Failed to clean up temporary user data directory %s: %s", user_data_dir, str(e))
+        # Clean up the temporary user data directory (only for local development)
+        if not os.getenv("GITHUB_ACTIONS"):
+            try:
+                if 'user_data_dir' in locals() and os.path.exists(user_data_dir):
+                    shutil.rmtree(user_data_dir)
+                    logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
+            except Exception as e:
+                logger.warning("Failed to clean up temporary user data directory %s: %s", user_data_dir, str(e))
 
 # Notification function for all users
 async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
