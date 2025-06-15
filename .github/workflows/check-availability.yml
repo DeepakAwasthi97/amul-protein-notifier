@@ -47,6 +47,13 @@ jobs:
           sudo chmod +x /usr/bin/chromedriver
           chromedriver --version
 
+      - name: Kill lingering Chrome processes
+        run: |
+          echo "Killing any lingering Chrome/Chromium processes..."
+          pkill -9 chrome || true
+          pkill -9 chromium || true
+          echo "Lingering processes killed."
+
       - name: Clean up stale Chrome user data directories
         run: |
           echo "Cleaning up stale Chrome user data directories in /tmp..."
