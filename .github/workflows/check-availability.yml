@@ -47,6 +47,12 @@ jobs:
           sudo chmod +x /usr/bin/chromedriver
           chromedriver --version
 
+      - name: Clean up stale Chrome user data directories
+        run: |
+          echo "Cleaning up stale Chrome user data directories in /tmp..."
+          rm -rf /tmp/.org.chromium.Chromium.*
+          echo "Cleanup complete."
+
       - name: Run Amul Protein Notifier
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

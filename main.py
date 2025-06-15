@@ -2,6 +2,8 @@ import os
 import json
 import base64
 import requests
+import tempfile
+import shutil
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from selenium import webdriver
@@ -168,13 +170,18 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
     
+    # Create a temporary directory for Chrome's user data
+    user_data_dir = tempfile.mkdtemp()
+    logger.info("Using temporary user data directory: %s", user_data_dir)
+    
     # Set up Selenium WebDriver
     options = webdriver.ChromeOptions()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument(f"--user-data-dir={user_data_dir}")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
-    # Use the correct binary path for Chromium in GitHub Actions
+    # Use the correct binary path for Chrome in GitHub Actions
     if os.getenv("GITHUB_ACTIONS"):
         options.binary_location = "/usr/bin/chrome"
     else:
@@ -311,6 +318,12 @@ def check_product_availability(pincode):
     finally:
         logger.info("Closing WebDriver.")
         driver.quit()
+        # Clean up the temporary user data directory
+        try:
+            shutil.rmtree(user_data_dir)
+            logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
+        except Exception as e:
+            logger.warning("Failed to clean up temporary user data directory %s: %s", user_data_dir, str(e))
 
 # Notification function for all users
 async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
