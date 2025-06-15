@@ -170,13 +170,13 @@ def check_product_availability(pincode):
     
     # Set up Selenium WebDriver
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")
-    # options.add_argument("--no-sandbox")
-    # options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
     # Use the correct binary path for Chromium in GitHub Actions
     if os.getenv("GITHUB_ACTIONS"):
-        options.binary_location = "/usr/bin/chromium-browser"
+        options.binary_location = "/usr/bin/chrome"
     else:
         # Use snap path for local testing if applicable
         options.binary_location = "/snap/bin/chromium"
