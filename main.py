@@ -43,13 +43,13 @@ def get_file_sha(path):
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         return response.json()["sha"]
+    logger.error("Could not retrieve SHA for %s: Status %d, Response: %s", path, response.status_code, response.text)
     return None
 
 def update_users_file(users_data):
     path = "users.json"
     sha = get_file_sha(path)
     if not sha:
-        logger.error("Could not retrieve SHA for users.json")
         return False
 
     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
@@ -65,6 +65,8 @@ def update_users_file(users_data):
         "branch": GITHUB_BRANCH
     }
     response = requests.put(url, headers=headers, json=data)
+    if response.status_code != 200:
+        logger.error("Failed to update users.json: Status %d, Response: %s", response.status_code, response.text)
     return response.status_code == 200
 
 def read_users_file():
@@ -75,7 +77,7 @@ def read_users_file():
     }
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
-        logger.error("Failed to read users.json")
+        logger.error("Failed to read users.json: Status %d, Response: %s", response.status_code, response.text)
         return {"users": []}
     content = base64.b64decode(response.json()["content"]).decode()
     return json.loads(content)
@@ -172,7 +174,12 @@ def check_product_availability(pincode):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
-    options.binary_location = "/snap/bin/chromium"
+    # Use the correct binary path for Chromium in GitHub Actions
+    if os.getenv("GITHUB_ACTIONS"):
+        options.binary_location = "/usr/lib/chromium-browser/chrome"
+    else:
+        # Use snap path for local testing if applicable
+        options.binary_location = "/snap/bin/chromium"
     driver = webdriver.Chrome(options=options)
     
     try:
@@ -180,7 +187,6 @@ def check_product_availability(pincode):
         logger.info("Navigating to URL: %s", url)
         driver.get(url)
         
-        # Enter PINCODE
         try:
             logger.info("Locating PINCODE input field...")
             pincode_input = WebDriverWait(driver, 10).until(
@@ -191,7 +197,6 @@ def check_product_availability(pincode):
             pincode_input.send_keys(pincode)
             logger.info("PINCODE entered successfully.")
             
-            # Wait for dropdown and click
             logger.info("Waiting for PINCODE dropdown to appear...")
             try:
                 WebDriverWait(driver, 10).until(

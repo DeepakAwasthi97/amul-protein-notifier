@@ -2,7 +2,7 @@ name: Amul Protein Notifier
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   push:
     branches:
       - main
@@ -29,14 +29,19 @@ jobs:
       - name: Install Chrome and ChromeDriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y snapd
-          sudo snap install chromium
-          chromium --version
-          CHROMEDRIVER_VERSION="137.0.7151.103"
+          sudo apt-get install -y wget unzip
+          # Install Chromium
+          sudo apt-get install -y chromium-browser
+          # Verify Chromium version
+          chromium-browser --version
+          # Get Chromium version to find matching ChromeDriver
+          CHROMIUM_VERSION=$(chromium-browser --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+          echo "Chromium version: $CHROMIUM_VERSION"
+          # Download matching ChromeDriver
+          CHROMEDRIVER_VERSION=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROMIUM_VERSION%.*}")
           echo "Downloading ChromeDriver version: $CHROMEDRIVER_VERSION"
-          wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROMEDRIVER_VERSION}/linux64/chromedriver-linux64.zip"
-          sudo unzip /tmp/chromedriver.zip chromedriver-linux64/chromedriver -d /usr/bin/
-          sudo mv /usr/bin/chromedriver-linux64/chromedriver /usr/bin/chromedriver
+          wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+          sudo unzip /tmp/chromedriver.zip chromedriver -d /usr/bin/
           sudo chmod +x /usr/bin/chromedriver
           chromedriver --version
 
