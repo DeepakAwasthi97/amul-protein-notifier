@@ -176,7 +176,7 @@ def check_product_availability(pincode):
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
     # Use the correct binary path for Chromium in GitHub Actions
     if os.getenv("GITHUB_ACTIONS"):
-        options.binary_location = "/usr/lib/chromium-browser/chrome"
+        options.binary_location = "/usr/bin/chromium-browser"
     else:
         # Use snap path for local testing if applicable
         options.binary_location = "/snap/bin/chromium"
