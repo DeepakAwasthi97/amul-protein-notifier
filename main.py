@@ -1,25 +1,27 @@
 import os
+import json
+import base64
 import requests
-from bs4 import BeautifulSoup
-from telegram import Bot
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, ElementClickInterceptedException, StaleElementReferenceException
 from selenium.webdriver.common.action_chains import ActionChains
-from dotenv import load_dotenv
-import asyncio
-import time
+from bs4 import BeautifulSoup
 import logging
+import asyncio
+from dotenv import load_dotenv
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # Output to console
-        logging.FileHandler('product_check.log')  # Output to a file
+        logging.StreamHandler(),
+        logging.FileHandler('product_check.log')
     ]
 )
 logger = logging.getLogger(__name__)
@@ -27,20 +29,150 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-PINCODE = os.getenv("PINCODE")
-PRODUCT_NAMES = os.getenv("PRODUCT_NAMES").split(";")  # e.g., ["Amul High Protein Paneer, 400 g | Pack of 24", "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30"] or ["Any"]
+GH_PAT = os.getenv("GH_PAT")
+GITHUB_REPO = "DeepakAwasthi97/amul-protein-notifier"
+GITHUB_BRANCH = "main"
 
-# Initialize Telegram bot
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+# GitHub API helper functions
+def get_file_sha(path):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    headers = {
+        "Authorization": f"token {GH_PAT}",
+        "Accept": "application/vnd.github+json"
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        return response.json()["sha"]
+    return None
 
-def check_product_availability():
+def update_users_file(users_data):
+    path = "users.json"
+    sha = get_file_sha(path)
+    if not sha:
+        logger.error("Could not retrieve SHA for users.json")
+        return False
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GH_PAT}",
+        "Accept": "application/vnd.github+json"
+    }
+    content = base64.b64encode(json.dumps(users_data, indent=2).encode()).decode()
+    data = {
+        "message": "Update users.json with new user data",
+        "content": content,
+        "sha": sha,
+        "branch": GITHUB_BRANCH
+    }
+    response = requests.put(url, headers=headers, json=data)
+    return response.status_code == 200
+
+def read_users_file():
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/users.json?ref={GITHUB_BRANCH}"
+    headers = {
+        "Authorization": f"token {GH_PAT}",
+        "Accept": "application/vnd.github+json"
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        logger.error("Failed to read users.json")
+        return {"users": []}
+    content = base64.b64decode(response.json()["content"]).decode()
+    return json.loads(content)
+
+# Telegram bot command handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(
+        "Welcome to the Amul Protein Notifier Bot!\n"
+        "Use /setpincode <PINCODE> to set your PIN code.\n"
+        "Use /setproducts <product1;product2> to set products (optional, default: Any).\n"
+        "Use /stop to stop notifications."
+    )
+
+async def set_pincode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Please provide a PIN code. Usage: /setpincode <PINCODE>")
+        return
+
+    pincode = context.args[0]
+    if not pincode.isdigit() or len(pincode) != 6:
+        await update.message.reply_text("PIN code must be a 6-digit number.")
+        return
+
+    users_data = read_users_file()
+    users = users_data["users"]
+    user = next((u for u in users if u["chat_id"] == str(chat_id)), None)
+
+    if user:
+        user["pincode"] = pincode
+        user["active"] = True
+    else:
+        users.append({
+            "chat_id": str(chat_id),
+            "pincode": pincode,
+            "products": ["Any"],
+            "active": True
+        })
+
+    if update_users_file(users_data):
+        await update.message.reply_text(f"PIN code set to {pincode}. You will receive notifications for available products.")
+    else:
+        await update.message.reply_text("Failed to update your PIN code. Please try again.")
+
+async def set_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Please provide products. Usage: /setproducts <product1;product2>")
+        return
+
+    products = context.args[0].split(";")
+    products = [p.strip() for p in products if p.strip()]
+    if not products:
+        products = ["Any"]
+
+    users_data = read_users_file()
+    users = users_data["users"]
+    user = next((u for u in users if u["chat_id"] == str(chat_id)), None)
+
+    if not user:
+        await update.message.reply_text("Please set your PIN code first using /setpincode.")
+        return
+
+    user["products"] = products
+    if update_users_file(users_data):
+        await update.message.reply_text(f"Products set to {', '.join(products)}.")
+    else:
+        await update.message.reply_text("Failed to update products. Please try again.")
+
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    users_data = read_users_file()
+    users = users_data["users"]
+    user = next((u for u in users if u["chat_id"] == str(chat_id)), None)
+
+    if not user:
+        await update.message.reply_text("You are not subscribed to notifications.")
+        return
+
+    user["active"] = False
+    if update_users_file(users_data):
+        await update.message.reply_text("Notifications stopped. Use /setpincode to restart.")
+    else:
+        await update.message.reply_text("Failed to stop notifications. Please try again.")
+
+# Product checking function
+def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
     
     # Set up Selenium WebDriver
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless")  # Uncomment for headless mode after testing
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
+    options.binary_location = "/snap/bin/chromium"
     driver = webdriver.Chrome(options=options)
     
     try:
@@ -54,21 +186,19 @@ def check_product_availability():
             pincode_input = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, '//*[@id="search"]'))
             )
-            logger.info("PINCODE input field found. Entering PINCODE: %s", PINCODE)
+            logger.info("PINCODE input field found. Entering PINCODE: %s", pincode)
             pincode_input.clear()
-            pincode_input.send_keys(PINCODE)
+            pincode_input.send_keys(pincode)
             logger.info("PINCODE entered successfully.")
             
             # Wait for dropdown and click
             logger.info("Waiting for PINCODE dropdown to appear...")
             try:
-                # Wait for the parent container to ensure DOM stability
                 WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located((By.ID, "automatic"))
                 )
                 logger.info("Parent container '#automatic' found.")
 
-                # Retry mechanism for clicking the dropdown
                 max_attempts = 3
                 for attempt in range(max_attempts):
                     try:
@@ -77,37 +207,31 @@ def check_product_availability():
                         )
                         logger.info("Dropdown element found on attempt %d.", attempt + 1)
 
-                        # Scroll into view
                         driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", dropdown_button)
                         logger.info("Scrolled to dropdown element.")
 
-                        # Check visibility and enabled state
                         logger.info("Dropdown - Is displayed: %s", dropdown_button.is_displayed())
                         logger.info("Dropdown - Is enabled: %s", dropdown_button.is_enabled())
                         logger.info("Dropdown - Element tag: %s", dropdown_button.tag_name)
                         logger.info("Dropdown - Element text: %s", dropdown_button.text)
                         logger.info("Dropdown - Element HTML: %s", driver.execute_script("return arguments[0].outerHTML;", dropdown_button))
 
-                        # Attempt click with ActionChains
                         logger.info("Attempt %d: Clicking dropdown with ActionChains...", attempt + 1)
                         ActionChains(driver).move_to_element(dropdown_button).click().perform()
 
-                        # Verify the click worked (e.g., check if dropdown disappears)
                         WebDriverWait(driver, 5).until(
                             EC.staleness_of(dropdown_button)
                         )
                         logger.info("Dropdown clicked successfully and disappeared!")
-                        break  # Exit retry loop on success
+                        break
 
                     except StaleElementReferenceException:
                         logger.warning("Attempt %d: Stale element detected, retrying...", attempt + 1)
                         continue
                     except ElementClickInterceptedException:
                         logger.warning("Attempt %d: Click intercepted, trying JavaScript click...", attempt + 1)
-                        # Fallback to JavaScript click
                         driver.execute_script("arguments[0].click();", dropdown_button)
                         logger.info("JavaScript click executed.")
-                        # Verify the click
                         WebDriverWait(driver, 5).until(
                             EC.staleness_of(dropdown_button)
                         )
@@ -124,7 +248,7 @@ def check_product_availability():
                     return []
 
             except TimeoutException:
-                logger.error("Pincode %s is not serviceable or dropdown did not appear.", PINCODE)
+                logger.error("Pincode %s is not serviceable or dropdown did not appear.", pincode)
                 driver.save_screenshot("pincode_dropdown_timeout.png")
                 return []
             except Exception as e:
@@ -133,40 +257,31 @@ def check_product_availability():
                 return []
                 
         except TimeoutException:
-            logger.error("Failed to find PINCODE input field for %s.", PINCODE)
+            logger.error("Failed to find PINCODE input field for %s.", pincode)
             driver.save_screenshot("pincode_input_timeout.png")
             return []
         
-        # Wait for the product list to load after PINCODE confirmation
         logger.info("Waiting for product list to load after PINCODE confirmation...")
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, ".product-grid-item"))
         )
         logger.info("Product list loaded after PINCODE confirmation.")
 
-        # Get page source and parse with BeautifulSoup
         logger.info("Parsing page source with BeautifulSoup...")
         soup = BeautifulSoup(driver.page_source, "html.parser")
         product_status = []
         
-        # Find product elements
         logger.info("Finding all product elements on the page...")
         products = soup.select(".product-grid-item")
         logger.info("Found %d product elements with selector '.product-grid-item'.", len(products))
 
-        # Debugging: Log the page source if no products are found
         if not products:
-            logger.warning("No products found with selector '.product-grid-item'. Dumping page source for debugging...")
+            logger.warning("No products found with selector '.product-grid-item'. Dumping page source...")
             with open("page_source.html", "w", encoding="utf-8") as f:
                 f.write(str(soup.prettify()))
             logger.info("Page source saved to 'page_source.html'.")
 
-        # Check if PRODUCT_NAMES is set to ["Any"]
-        check_all_products = (len(PRODUCT_NAMES) == 1 and PRODUCT_NAMES[0].strip().lower() == "any")
-        logger.info("Check all products: %s", check_all_products)
-
         for product in products:
-            # Extract product name
             name_elem = product.select_one(".product-grid-name")
             if not name_elem:
                 logger.warning("Product name element not found for a product, skipping...")
@@ -174,24 +289,17 @@ def check_product_availability():
             name = name_elem.text.strip()
             logger.info("Processing product: %s", name)
 
-            # Determine if we should process this product
-            if check_all_products or any(p.lower() in name.lower() for p in PRODUCT_NAMES):
-                logger.info("Product %s matches criteria, checking stock status...", name)
+            sold_out_elem = product.select_one("span.stock-indicator-text")
+            product_classes = product.get("class", [])
+            is_out_of_stock = ("outofstock" in product_classes) or (sold_out_elem and "sold out" in sold_out_elem.text.strip().lower())
+            
+            if is_out_of_stock:
+                logger.info("Product %s has 'Sold Out' indicator or 'outofstock' class.", name)
+                product_status.append((name, "Sold Out"))
+            else:
+                logger.info("Product %s does not have 'Sold Out' indicator or 'outofstock' class, marking as In Stock.", name)
+                product_status.append((name, "In Stock"))
 
-                # Check for "Sold Out" indicator within this product
-                sold_out_elem = product.select_one("span.stock-indicator-text")
-                # Additional check: Look for "outofstock" in the product's class list
-                product_classes = product.get("class", [])
-                is_out_of_stock = ("outofstock" in product_classes) or (sold_out_elem and "sold out" in sold_out_elem.text.strip().lower())
-                
-                if is_out_of_stock:
-                    logger.info("Product %s has 'Sold Out' indicator or 'outofstock' class.", name)
-                    product_status.append((name, "Sold Out"))
-                else:
-                    logger.info("Product %s does not have 'Sold Out' indicator or 'outofstock' class, marking as In Stock.", name)
-                    product_status.append((name, "In Stock"))
-
-        # Log the final list of products and their status
         logger.info("Final product status list: %s", product_status)
         return product_status
     
@@ -199,50 +307,67 @@ def check_product_availability():
         logger.info("Closing WebDriver.")
         driver.quit()
 
-async def send_telegram_notification(products):
+# Notification function for all users
+async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
     if not products:
-        logger.info("No products found to notify about.")
+        logger.info("No products found to notify about for chat_id %s.", chat_id)
         return
 
-    # Check if we're looking for all products (PRODUCT_NAMES = ["Any"])
-    check_all_products = (len(PRODUCT_NAMES) == 1 and PRODUCT_NAMES[0].strip().lower() == "any")
+    check_all_products = (len(product_names) == 1 and product_names[0].strip().lower() == "any")
     
     if check_all_products:
-        # If checking all products, notify about all that are "In Stock"
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
-        logger.info("In Stock products for 'Any': %s", in_stock_products)
+        logger.info("In Stock products for 'Any' for chat_id %s: %s", chat_id, in_stock_products)
 
         if not in_stock_products:
-            # If all products are "Sold Out", send the special message
-            message = f"None of the Amul Protein items are available for your PINCODE: {PINCODE}"
-            logger.info("All products are Sold Out, sending notification: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            message = f"None of the Amul Protein items are available for your PINCODE: {pincode}"
+            logger.info("All products are Sold Out for chat_id %s, sending notification: %s", chat_id, message)
+            await app.bot.send_message(chat_id=chat_id, text=message)
         else:
-            # Notify about all "In Stock" products
-            message = f"Available Amul Protein Products for PINCODE {PINCODE}:\n\n"
+            message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
             for name, _ in in_stock_products:
                 message += f"- {name}\n"
-            logger.info("Sending Telegram notification for available products: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            logger.info("Sending Telegram notification for chat_id %s: %s", chat_id, message)
+            await app.bot.send_message(chat_id=chat_id, text=message)
     else:
-        # If checking specific products, notify only for those that are "In Stock"
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
-        logger.info("In Stock products for specific list: %s", in_stock_products)
+        logger.info("In Stock products for specific list for chat_id %s: %s", chat_id, in_stock_products)
 
-        if in_stock_products:
-            message = f"Available Amul Protein Products for PINCODE {PINCODE}:\n\n"
-            for name, _ in in_stock_products:
+        relevant_products = [(name, status) for name, status in in_stock_products if any(p.lower() in name.lower() for p in product_names)]
+        if relevant_products:
+            message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
+            for name, _ in relevant_products:
                 message += f"- {name}\n"
-            logger.info("Sending Telegram notification for available products: %s", message)
-            await bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            logger.info("Sending Telegram notification for chat_id %s: %s", chat_id, message)
+            await app.bot.send_message(chat_id=chat_id, text=message)
         else:
-            logger.info("No 'In Stock' products to notify about.")
+            logger.info("No 'In Stock' products to notify about for chat_id %s.", chat_id)
+
+# Main function for GitHub Actions to check products for all users
+async def check_products_for_users():
+    users_data = read_users_file()
+    active_users = [u for u in users_data["users"] if u.get("active", False)]
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    for user in active_users:
+        chat_id = user["chat_id"]
+        pincode = user["pincode"]
+        products_to_check = user["products"]
+        logger.info("Checking products for chat_id %s, PINCODE %s", chat_id, pincode)
+
+        product_status = check_product_availability(pincode)
+        await send_telegram_notification_for_user(app, chat_id, pincode, products_to_check, product_status)
 
 def main():
-    logger.info("Starting product availability check...")
-    product_status = check_product_availability()
-    asyncio.run(send_telegram_notification(product_status))
-    logger.info("Product check completed.")
+    if os.getenv("GITHUB_ACTIONS"):
+        asyncio.run(check_products_for_users())
+    else:
+        app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("setpincode", set_pincode))
+        app.add_handler(CommandHandler("setproducts", set_products))
+        app.add_handler(CommandHandler("stop", stop))
+        app.run_polling()
 
 if __name__ == "__main__":
     main()
