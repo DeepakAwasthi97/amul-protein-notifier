@@ -4,6 +4,7 @@ import base64
 import requests
 import tempfile
 import shutil
+import uuid
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from selenium import webdriver
@@ -167,29 +168,51 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Failed to stop notifications. Please try again.")
 
 # Product checking function
+
 def check_product_availability(pincode):
     url = "https://shop.amul.com/en/browse/protein"
     
-    # Create a temporary directory for Chrome's user data
-    user_data_dir = tempfile.mkdtemp()
+    # Create a unique temporary directory for Chrome's user data
+    unique_id = str(uuid.uuid4())
+    user_data_dir = tempfile.mkdtemp(prefix=f"chrome_user_data_{unique_id}_")
     logger.info("Using temporary user data directory: %s", user_data_dir)
     
     # Set up Selenium WebDriver
     options = webdriver.ChromeOptions()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless")  # Run in headless mode for GitHub Actions
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-timer-throttling")
+    options.add_argument("--disable-backgrounding-occluded-windows")
+    options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-features=TranslateUI")
+    options.add_argument("--disable-ipc-flooding-protection")
+    options.add_argument("--disable-web-security")
+    options.add_argument("--disable-features=VizDisplayCompositor")
+    options.add_argument("--remote-debugging-port=9222")
     options.add_argument(f"--user-data-dir={user_data_dir}")
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/137.0.7151.69")
+    options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.69 Safari/537.36")
+    
     # Use the correct binary path for Chrome in GitHub Actions
     if os.getenv("GITHUB_ACTIONS"):
         options.binary_location = "/usr/bin/chrome"
+        # Add additional GitHub Actions specific options
+        options.add_argument("--single-process")
+        options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-default-apps")
+        options.add_argument("--disable-sync")
     else:
         # Use snap path for local testing if applicable
         options.binary_location = "/snap/bin/chromium"
-    driver = webdriver.Chrome(options=options)
     
+    driver = None
     try:
+        logger.info("Initializing Chrome WebDriver...")
+        driver = webdriver.Chrome(options=options)
+        logger.info("Chrome WebDriver initialized successfully")
+        
         driver.maximize_window()
         logger.info("Navigating to URL: %s", url)
         driver.get(url)
@@ -315,13 +338,23 @@ def check_product_availability(pincode):
         logger.info("Final product status list: %s", product_status)
         return product_status
     
+    except Exception as e:
+        logger.error("Error initializing or using Chrome WebDriver: %s", str(e))
+        return []
+    
     finally:
-        logger.info("Closing WebDriver.")
-        driver.quit()
+        if driver:
+            logger.info("Closing WebDriver.")
+            try:
+                driver.quit()
+            except Exception as e:
+                logger.warning("Error while quitting driver: %s", str(e))
+        
         # Clean up the temporary user data directory
         try:
-            shutil.rmtree(user_data_dir)
-            logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
+            if os.path.exists(user_data_dir):
+                shutil.rmtree(user_data_dir)
+                logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
         except Exception as e:
             logger.warning("Failed to clean up temporary user data directory %s: %s", user_data_dir, str(e))
 

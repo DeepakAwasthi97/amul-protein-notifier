@@ -11,6 +11,7 @@ on:
 jobs:
   check-products:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -26,47 +27,77 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Kill any existing Chrome processes
+        run: |
+          echo "Killing any existing Chrome/Chromium processes..."
+          pkill -9 chrome || true
+          pkill -9 chromium || true
+          pkill -9 chromedriver || true
+          echo "Process cleanup complete."
+
+      - name: Clean up Chrome directories
+        run: |
+          echo "Cleaning up Chrome directories..."
+          rm -rf /tmp/.org.chromium.Chromium.*
+          rm -rf /tmp/chrome_user_data_*
+          rm -rf /tmp/tmp*chrome*
+          echo "Directory cleanup complete."
+
       - name: Install Chrome and ChromeDriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget unzip jq
+          sudo apt-get install -y wget unzip jq xvfb
+          
           # Fetch the stable Chrome version from Chrome for Testing
           CHROME_VERSION=$(curl -s https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json | jq -r ".channels.Stable.version")
           echo "Installing Chrome version: $CHROME_VERSION"
-          # Download and install Chrome (not Chromium) to match ChromeDriver
+          
+          # Download and install Chrome
           wget -O /tmp/chrome.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chrome-linux64.zip"
           unzip /tmp/chrome.zip -d /tmp/chrome
           sudo mv /tmp/chrome/chrome-linux64/chrome /usr/bin/chrome
           sudo chmod +x /usr/bin/chrome
-          chrome --version
+          
           # Download the matching ChromeDriver
           echo "Downloading ChromeDriver version: $CHROME_VERSION"
           wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip"
           sudo unzip /tmp/chromedriver.zip chromedriver-linux64/chromedriver -d /usr/bin/
           sudo mv /usr/bin/chromedriver-linux64/chromedriver /usr/bin/chromedriver
           sudo chmod +x /usr/bin/chromedriver
+          
+          # Verify installations
+          chrome --version
           chromedriver --version
 
-      - name: Kill lingering Chrome processes
+      - name: Set up virtual display
         run: |
-          echo "Killing any lingering Chrome/Chromium processes..."
-          pkill -9 chrome || true
-          pkill -9 chromium || true
-          echo "Lingering processes killed."
-
-      - name: Clean up stale Chrome user data directories
-        run: |
-          echo "Cleaning up stale Chrome user data directories in /tmp..."
-          rm -rf /tmp/.org.chromium.Chromium.*
-          echo "Cleanup complete."
+          export DISPLAY=:99
+          Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+          echo "DISPLAY=:99" >> $GITHUB_ENV
 
       - name: Run Amul Protein Notifier
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
-        run: python main.py
+          DISPLAY: ${{ env.DISPLAY }}
+        run: |
+          python main.py
+
+      - name: Final cleanup
+        if: always()
+        run: |
+          echo "Final cleanup of Chrome processes and directories..."
+          pkill -9 chrome || true
+          pkill -9 chromium || true
+          pkill -9 chromedriver || true
+          pkill -9 Xvfb || true
+          rm -rf /tmp/.org.chromium.Chromium.*
+          rm -rf /tmp/chrome_user_data_*
+          rm -rf /tmp/tmp*chrome*
+          echo "Final cleanup complete."
 
       - name: Debug - List files
+        if: always()
         run: ls -la
 
       - name: Upload logs
@@ -74,4 +105,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: product-check-logs
-          path: product_check.log
+          path: |
+            product_check.log
+            *.png
+            *.html
