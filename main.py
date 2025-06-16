@@ -5,6 +5,8 @@ import requests
 import tempfile
 import shutil
 import uuid
+import psutil
+import sys
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from selenium import webdriver
@@ -38,6 +40,18 @@ GH_PAT = os.getenv("GH_PAT")
 # GITHUB_REPO = "DeepakAwasthi97/amul-protein-notifier"
 PRIVATE_REPO = os.getenv("PRIVATE_REPO", "DeepakAwasthi97/amul-protein-users")  # Fallback for local testing
 GITHUB_BRANCH = "main"
+
+# Check if another instance of the script is already running
+def is_already_running():
+    current_pid = os.getpid()
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        if proc.info['name'] == 'python' and 'main.py' in ' '.join(proc.info['cmdline']) and proc.info['pid'] != current_pid:
+            return True
+    return False
+
+if is_already_running():
+    print("Another instance is running. Exiting.")
+    sys.exit(0)
 
 # GitHub API helper functions
 # def get_file_sha(path):
