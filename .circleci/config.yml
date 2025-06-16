@@ -1,0 +1,29 @@
+version: 2.1
+jobs:
+  run-bot:
+    docker:
+      - image: cimg/python:3.9
+    steps:
+      - checkout
+      - run:
+          name: Install Dependencies
+          command: |
+            pip install --user -r requirements.txt
+            # Install ChromeDriver if needed for Selenium
+            sudo apt-get update
+            sudo apt-get install -y chromium-chromedriver
+      - run:
+          name: Run Bot
+          command: |
+            python main.py
+          background: true  # Supports Telegram polling
+workflows:
+  bot-workflow:
+    jobs:
+      - run-bot
+    triggers:
+      - schedule:
+          cron: "0,5,10,15,20,25,30,35,40,45,50,55 * * * *"  # Run every 5 minutes
+          filters:
+            branches:
+              only: main
