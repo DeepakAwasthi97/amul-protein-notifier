@@ -79,6 +79,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          PRIVATE_REPO: ${{ secrets.PRIVATE_REPO }}
           DISPLAY: ${{ env.DISPLAY }}
         run: |
           python main.py

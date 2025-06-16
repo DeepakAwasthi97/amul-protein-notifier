@@ -35,12 +35,62 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GH_PAT = os.getenv("GH_PAT")
-GITHUB_REPO = "DeepakAwasthi97/amul-protein-notifier"
+# GITHUB_REPO = "DeepakAwasthi97/amul-protein-notifier"
+PRIVATE_REPO = os.getenv("PRIVATE_REPO", "DeepakAwasthi97/amul-protein-users")  # Fallback for local testing
 GITHUB_BRANCH = "main"
 
 # GitHub API helper functions
+# def get_file_sha(path):
+#     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+#     headers = {
+#         "Authorization": f"token {GH_PAT}",
+#         "Accept": "application/vnd.github+json"
+#     }
+#     response = requests.get(url, headers=headers)
+#     if response.status_code == 200:
+#         return response.json()["sha"]
+#     logger.error("Could not retrieve SHA for %s: Status %d, Response: %s", path, response.status_code, response.text)
+#     return None
+
+# def update_users_file(users_data):
+#     path = "users.json"
+#     sha = get_file_sha(path)
+#     if not sha:
+#         return False
+
+#     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+#     headers = {
+#         "Authorization": f"token {GH_PAT}",
+#         "Accept": "application/vnd.github+json"
+#     }
+#     content = base64.b64encode(json.dumps(users_data, indent=2).encode()).decode()
+#     data = {
+#         "message": "Update users.json with new user data",
+#         "content": content,
+#         "sha": sha,
+#         "branch": GITHUB_BRANCH
+#     }
+#     response = requests.put(url, headers=headers, json=data)
+#     if response.status_code != 200:
+#         logger.error("Failed to update users.json: Status %d, Response: %s", response.status_code, response.text)
+#     return response.status_code == 200
+
+# def read_users_file():
+#     url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/users.json?ref={GITHUB_BRANCH}"
+#     headers = {
+#         "Authorization": f"token {GH_PAT}",
+#         "Accept": "application/vnd.github+json"
+#     }
+#     response = requests.get(url, headers=headers)
+#     if response.status_code != 200:
+#         logger.error("Failed to read users.json: Status %d, Response: %s", response.status_code, response.text)
+#         return {"users": []}
+#     content = base64.b64decode(response.json()["content"]).decode()
+#     return json.loads(content)
+
+# GitHub API helper functions
 def get_file_sha(path):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
+    url = f"https://api.github.com/repos/{PRIVATE_REPO}/contents/{path}?ref={GITHUB_BRANCH}"
     headers = {
         "Authorization": f"token {GH_PAT}",
         "Accept": "application/vnd.github+json"
@@ -57,7 +107,7 @@ def update_users_file(users_data):
     if not sha:
         return False
 
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    url = f"https://api.github.com/repos/{PRIVATE_REPO}/contents/{path}"
     headers = {
         "Authorization": f"token {GH_PAT}",
         "Accept": "application/vnd.github+json"
@@ -75,7 +125,7 @@ def update_users_file(users_data):
     return response.status_code == 200
 
 def read_users_file():
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/users.json?ref={GITHUB_BRANCH}"
+    url = f"https://api.github.com/repos/{PRIVATE_REPO}/contents/users.json?ref={GITHUB_BRANCH}"
     headers = {
         "Authorization": f"token {GH_PAT}",
         "Accept": "application/vnd.github+json"
@@ -92,15 +142,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     await update.message.reply_text(
         "Welcome to the Amul Protein Notifier Bot!\n"
-        "Use /setpincode <PINCODE> to set your PIN code.\n"
-        "Use /setproducts <product1;product2> to set products (optional, default: Any).\n"
+        "Use /setpincode PINCODE to set your PIN code (Mandatory).\n"
+        "Use /setproducts product1;product2 to set products (this is optional, by default we will show any product which is available for your pincode).\n"
         "Use /stop to stop notifications."
     )
 
 async def set_pincode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not context.args:
-        await update.message.reply_text("Please provide a PIN code. Usage: /setpincode <PINCODE>")
+        await update.message.reply_text("Please provide a PIN code. Usage: /setpincode PINCODE")
         return
 
     pincode = context.args[0]
@@ -131,7 +181,7 @@ async def set_pincode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not context.args:
-        await update.message.reply_text("Please provide products. Usage: /setproducts <product1;product2>")
+        await update.message.reply_text("Please provide products. Usage: /setproducts product1;product2")
         return
 
     products = context.args[0].split(";")
@@ -144,14 +194,14 @@ async def set_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = next((u for u in users if u["chat_id"] == str(chat_id)), None)
 
     if not user:
-        await update.message.reply_text("Please set your PIN code first using /setpincode.")
+        await update.message.reply_text("Please set your PIN code first using /setpincode PINCODE")
         return
 
     user["products"] = products
     if update_users_file(users_data):
         await update.message.reply_text(f"Products set to {', '.join(products)}.")
     else:
-        await update.message.reply_text("Failed to update products. Please try again.")
+        await update.message.reply_text("Failed to update products. Make sure you have provided the product names as per shown in the Amul Protein website.")
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
