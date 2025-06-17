@@ -16,14 +16,15 @@ jobs:
           name: Run Bot
           command: |
             python main.py
-          background: false  # Supports Telegram polling
+      - store_artifacts:
+          path: product_check.log
 workflows:
   bot-workflow:
     jobs:
       - run-bot
     triggers:
       - schedule:
-          cron: "*/15 * * * *"  # Run every 15 minutes
+          cron: "0,15,30,45 * * * *"  # Run every 15 minutes
           filters:
             branches:
               only: main
