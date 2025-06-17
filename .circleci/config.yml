@@ -16,6 +16,7 @@ jobs:
           name: Run Bot
           command: |
             python main.py
+          timeout: 14m
       - store_artifacts:
           path: product_check.log
 workflows:
