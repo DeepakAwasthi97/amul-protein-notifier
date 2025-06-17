@@ -23,7 +23,7 @@ workflows:
       - run-bot
     triggers:
       - schedule:
-          cron: "0,15,30,45 * * * *"  # Run every 15 minutes
+          cron: "*/15 * * * *"  # Run every 15 minutes
           filters:
             branches:
               only: main
