@@ -385,6 +385,7 @@ async def main():
         app.add_handler(CommandHandler("setpincode", set_pincode))
         app.add_handler(CommandHandler("setproducts", set_products))
         app.add_handler(CommandHandler("stop", stop))
+        await app.initialize()
         await app.start()
         polling_task = asyncio.create_task(app.run_polling())
         try:

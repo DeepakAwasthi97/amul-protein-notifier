@@ -2,7 +2,7 @@ version: 2.1
 jobs:
   run-bot:
     docker:
-      - image: cimg/python:3.9
+      - image: cimg/python:3.10
     steps:
       - checkout
       - run:
@@ -16,7 +16,6 @@ jobs:
           name: Run Bot
           command: |
             python main.py
-          timeout: 14m
       - store_artifacts:
           path: product_check.log
 workflows:
