@@ -16,7 +16,7 @@ jobs:
           name: Run Bot
           command: |
             python main.py
-          background: true  # Supports Telegram polling
+          background: false  # Supports Telegram polling
 workflows:
   bot-workflow:
     jobs:
