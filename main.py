@@ -374,10 +374,10 @@ async def check_products_for_users():
         product_status = check_product_availability(pincode)
         await send_telegram_notification_for_user(app, chat_id, pincode, products_to_check, product_status)
 
-async def main():
+def main():
     if os.getenv("GITHUB_ACTIONS"):
         logger.info("Running in CI environment, executing product checks")
-        await check_products_for_users()
+        asyncio.run(check_products_for_users())
     else:
         logger.info("Running in CircleCI or locally, starting Telegram polling")
         app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -385,16 +385,7 @@ async def main():
         app.add_handler(CommandHandler("setpincode", set_pincode))
         app.add_handler(CommandHandler("setproducts", set_products))
         app.add_handler(CommandHandler("stop", stop))
-        await app.initialize()
-        await app.start()
-        polling_task = asyncio.create_task(app.run_polling())
-        try:
-            await asyncio.wait_for(polling_task, timeout=840)
-        except asyncio.TimeoutError:
-            logger.info("Polling timeout reached, stopping application")
-            await app.stop()
-            await app.shutdown()
+        app.run_polling(timeout=840)
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    main()
