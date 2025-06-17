@@ -385,12 +385,15 @@ async def main():
         app.add_handler(CommandHandler("setpincode", set_pincode))
         app.add_handler(CommandHandler("setproducts", set_products))
         app.add_handler(CommandHandler("stop", stop))
+        await app.start()
+        polling_task = asyncio.create_task(app.run_polling())
         try:
-            await asyncio.wait_for(app.run_polling(), timeout=840)
+            await asyncio.wait_for(polling_task, timeout=840)
         except asyncio.TimeoutError:
             logger.info("Polling timeout reached, stopping application")
             await app.stop()
             await app.shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
