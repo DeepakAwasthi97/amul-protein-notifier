@@ -391,7 +391,7 @@ async def end_polling(app):
     await app.start()
     await app.updater.start_polling()
     try:
-        await asyncio.sleep(840)  # 14 minutes
+        await asyncio.sleep(700)
     finally:
         await app.updater.stop()
         await app.stop()
@@ -411,7 +411,7 @@ def main():
         app.add_handler(CommandHandler("setpincode", set_pincode))
         app.add_handler(CommandHandler("setproducts", set_products))
         app.add_handler(CommandHandler("stop", stop))
-        logger.info("Ending Telegram bot polling...")
+        logger.info("Starting Telegram bot polling...")
         asyncio.run(end_polling(app))
         logger.info("Telegram bot polling ended, exiting main function.")
 
