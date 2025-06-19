@@ -391,7 +391,7 @@ async def end_polling(app):
     await app.start()
     await app.updater.start_polling()
     try:
-        await asyncio.sleep(700)
+        await asyncio.sleep(800)
     finally:
         await app.updater.stop()
         await app.stop()
