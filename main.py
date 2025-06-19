@@ -20,6 +20,13 @@ import logging
 import asyncio
 from dotenv import load_dotenv
 
+# Setup masking for sensitive information
+def mask(value, visible=2):
+    value = str(value)
+    if len(value) <= visible * 2:
+        return "*" * len(value)
+    return value[:visible] + "*" * (len(value) - 2 * visible) + value[-visible:]
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -169,7 +176,7 @@ async def set_products(update: Update, context: ContextTypes):
         await update.message.reply_text(f"You will get notifications only for these Products :\n" + "\n".join(f"- {p}" for p in products))
     else:
         await update.message.reply_text("Failed to update products. Please try again.")
-    logger.info(f"User {chat_id} set products: {products}")
+    logger.info(f"User {mask(chat_id)} set products: {products}")
 
 async def stop(update: Update, context: ContextTypes):
     chat_id = update.effective_chat.id
@@ -189,7 +196,7 @@ async def stop(update: Update, context: ContextTypes):
 def check_product_availability(pincode):
     global pincode_cache
     if pincode in pincode_cache:
-        logger.info(f"Using cached results for pincode: {pincode}")
+        logger.info(f"Using cached results for pincode: {mask(pincode)}")
         return pincode_cache[pincode]
     url = "https://shop.amul.com/en/browse/protein"
     options = webdriver.ChromeOptions()
@@ -212,7 +219,7 @@ def check_product_availability(pincode):
             pincode_input = WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.XPATH, '//*[@id="search"]'))
             )
-            logger.info("PINCODE input field found. Entering PINCODE: %s", pincode)
+            logger.info("PINCODE input field found. Entering PINCODE: %s", mask(pincode))
             pincode_input.clear()
             pincode_input.send_keys(pincode)
             logger.info("PINCODE entered successfully.")
@@ -236,7 +243,7 @@ def check_product_availability(pincode):
                         logger.info("Scrolled to dropdown element.")
                         logger.info("Dropdown - Is displayed: %s", dropdown_button.is_displayed())
                         logger.info("Dropdown - Is enabled: %s", dropdown_button.is_enabled())
-                        logger.info("Dropdown - Element text: %s", dropdown_button.text)
+                        logger.info("Dropdown - Element text: %s", mask(dropdown_button.text))
                         logger.info("Attempt %d: Clicking dropdown with JavaScript...", attempt + 1)
                         driver.execute_script("arguments[0].click();", dropdown_button)
                         try:
@@ -266,7 +273,7 @@ def check_product_availability(pincode):
                     driver.save_screenshot("pincode_final_failure.png")
                     return []
             except TimeoutException:
-                logger.error("Pincode %s is not serviceable or dropdown did not appear.", pincode)
+                logger.error("Pincode %s is not serviceable or dropdown did not appear.", mask(pincode))
                 driver.save_screenshot("pincode_dropdown_timeout.png")
                 return []
             except Exception as e:
@@ -274,7 +281,7 @@ def check_product_availability(pincode):
                 driver.save_screenshot("pincode_error.png")
                 return []
         except TimeoutException:
-            logger.error("Failed to find PINCODE input field for %s.", pincode)
+            logger.error("Failed to find PINCODE input field for %s.", mask(pincode))
             driver.save_screenshot("pincode_input_timeout.png")
             return []
         logger.info("Waiting for product list to load after PINCODE confirmation...")
@@ -311,7 +318,7 @@ def check_product_availability(pincode):
                 product_status.append((name, "In Stock"))
         logger.info("Final product status list: %s", product_status)
         pincode_cache[pincode] = product_status
-        logger.info(f"Cached results for pincode: {pincode}")
+        logger.info(f"Cached results for pincode: {mask(pincode)}")
         return product_status
     except Exception as e:
         logger.error("Error initializing or using Chrome WebDriver: %s", str(e))
@@ -339,34 +346,34 @@ def check_product_availability(pincode):
 # Notification function for all users
 async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
     if not products:
-        logger.info("No products found to notify about for chat_id %s.", chat_id)
+        logger.info("No products found to notify about for chat_id %s.", mask(chat_id))
         return
     check_all_products = (len(product_names) == 1 and product_names[0].strip().lower() == "any")
     if check_all_products:
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
-        logger.info("In Stock products for 'Any' for chat_id %s: %s", chat_id, in_stock_products)
+        logger.info("In Stock products for 'Any' for chat_id %s: %s", mask(chat_id), in_stock_products)
         if not in_stock_products:
             message = f"None of the Amul Protein items are available for your PINCODE: {pincode}"
-            logger.info("All products are Sold Out for chat_id %s, sending notification: %s", chat_id, message)
+            logger.info("All products are Sold Out for chat_id %s, sending notification: %s", mask(chat_id), message)
             await app.bot.send_message(chat_id=chat_id, text=message)
         else:
             message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
             for name, _ in in_stock_products:
                 message += f"- {name}\n"
-            logger.info("Sending Telegram notification for chat_id %s: %s", chat_id, message)
+            logger.info("Sending Telegram notification for chat_id %s: %s", mask(chat_id), message)
             await app.bot.send_message(chat_id=chat_id, text=message)
     else:
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
-        logger.info("In Stock products for specific list for chat_id %s: %s", chat_id, in_stock_products)
+        logger.info("In Stock products for specific list for chat_id %s: %s", mask(chat_id), in_stock_products)
         relevant_products = [(name, status) for name, status in in_stock_products if any(p.lower() in name.lower() for p in product_names)]
         if relevant_products:
             message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
             for name, _ in relevant_products:
                 message += f"- {name}\n"
-            logger.info("Sending Telegram notification for chat_id %s: %s", chat_id, message)
+            logger.info("Sending Telegram notification for chat_id %s: %s", mask(chat_id), message)
             await app.bot.send_message(chat_id=chat_id, text=message)
         else:
-            logger.info("No 'In Stock' products to notify about for chat_id %s.", chat_id)
+            logger.info("No 'In Stock' products to notify about for chat_id %s.", mask(chat_id))
 
 # Main function for checking products for all users
 async def check_products_for_users():
@@ -380,10 +387,10 @@ async def check_products_for_users():
         chat_id = user["chat_id"]
         pincode = user["pincode"]
         products_to_check = user["products"]
-        logger.info("Checking products for chat_id %s, PINCODE %s", chat_id, pincode)
+        logger.info("Checking products for chat_id %s, PINCODE %s", mask(chat_id), mask(pincode))
         product_status = check_product_availability(pincode)
         await send_telegram_notification_for_user(app, chat_id, pincode, products_to_check, product_status)
-        logger.info("Finished checking products for chat_id %s", chat_id)
+        logger.info("Finished checking products for chat_id %s", mask(chat_id))
 
 # async def end_polling(app):
 #     """Manually start polling and stop after 15 minutes."""
