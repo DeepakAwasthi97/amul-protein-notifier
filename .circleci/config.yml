@@ -24,14 +24,25 @@ jobs:
       - image: cimg/base:stable
     steps:
       - run:
-          name: Wait and Cancel Pipeline if Needed
+          name: Cancel Workflow After Timeout
           command: |
-            echo "Waiting for 10 minutes..."
-            sleep 600  # 600s = 10 mins
-            echo "Canceling workflow now..."
-            curl -X POST "https://circleci.com/api/v2/workflow/${CIRCLE_WORKFLOW_ID}/cancel" \
+            echo "Waiting 10 minutes before cancelling workflow..."
+            sleep 600
+
+            echo "Cancelling workflow: $CIRCLE_WORKFLOW_ID"
+            RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+              https://circleci.com/api/v2/workflow/${CIRCLE_WORKFLOW_ID}/cancel \
               -H "Circle-Token: ${CIRCLECI_TOKEN}" \
-              -H "Content-Type: application/json"
+              -H "Content-Type: application/json")
+
+            echo "Cancel API response: $RESPONSE"
+
+            if [ "$RESPONSE" -eq 202 ]; then
+              echo "✅ Workflow cancelled successfully."
+            else
+              echo "❌ Workflow cancel failed with response code: $RESPONSE"
+              exit 1
+            fi
 
 workflows:
   bot-workflow:
