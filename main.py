@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GH_PAT = os.getenv("GH_PAT")
-PRIVATE_REPO = os.getenv("PRIVATE_REPO", "DeepakAwasthi97/amul-protein-users")
+PRIVATE_REPO = os.getenv("PRIVATE_REPO")
 GITHUB_BRANCH = "main"
 
 # Define pincode cache
@@ -43,15 +43,25 @@ pincode_cache = {}
 
 # Check if another instance of the script is already running
 def is_already_running():
+    logger.info("Checking for running instances")
     current_pid = os.getpid()
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-        if proc.info['name'] == 'python' and 'main.py' in ' '.join(proc.info['cmdline']) and proc.info['pid'] != current_pid:
-            return True
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if (proc.info['name'].lower() == 'python' and 
+                    proc.info['cmdline'] and 
+                    'main.py' in ' '.join(proc.info['cmdline']).lower() and 
+                    proc.info['pid'] != current_pid):
+                    logger.info("Found another running instance with PID %d", proc.info['pid'])
+                    return True
+            except (psutil.AccessDenied, psutil.NoSuchProcess) as e:
+                logger.warning("Could not access process %d: %s", proc.info['pid'], str(e))
+                continue
+    except Exception as e:
+        logger.error("Error checking running processes: %s", str(e))
+        return False
+    logger.info("No other running instances found")
     return False
-
-if is_already_running():
-    print("Another instance is running. Exiting.")
-    sys.exit(1)
 
 # GitHub API helper functions
 def get_file_sha(path):
@@ -105,9 +115,9 @@ def read_users_file():
 async def start(update: Update, context: ContextTypes):
     chat_id = update.effective_chat.id
     await update.message.reply_text(
-        "Welcome to the Amul Protein Notifier Bot!\n"
+        "Welcome to the Amul Protein Items Notifier Bot!\n"
         "Use /setpincode PINCODE to set your PIN code (Mandatory).\n"
-        "Use /setproducts product1;product2 to set products (this is optional, by default we will show any product which is available for your pincode).\n"
+        "Use /setproducts product1;product2 to set products (Optional, by default we will show any Amul protein product which is available for your pincode).\n"
         "Use /stop to stop notifications."
     )
 
@@ -141,7 +151,7 @@ async def set_pincode(update: Update, context: ContextTypes):
 async def set_products(update: Update, context: ContextTypes):
     chat_id = update.effective_chat.id
     if not context.args:
-        await update.message.reply_text("Please provide products. Usage: /setproducts product1;product2")
+        await update.message.reply_text("Please provide full product name seperated by ; \nor enter 'Any' to get notified for any protein product. \nUsage: /setproducts product1;product2")
         return
     # Join all arguments to handle spaces and commas, then split by semicolon
     raw_input = " ".join(context.args)
@@ -373,10 +383,26 @@ async def check_products_for_users():
         logger.info("Checking products for chat_id %s, PINCODE %s", chat_id, pincode)
         product_status = check_product_availability(pincode)
         await send_telegram_notification_for_user(app, chat_id, pincode, products_to_check, product_status)
+        logger.info("Finished checking products for chat_id %s", chat_id)
 
+async def end_polling(app):
+    """Manually start polling and stop after 15 minutes."""
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+    try:
+        await asyncio.sleep(840)  # 14 minutes
+    finally:
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        print("Bot stopped after preferred minutes.")
+
+# Main function to run the bot or product checks
 def main():
+    logger.info("Starting main function")
     if os.getenv("GITHUB_ACTIONS"):
-        logger.info("Running in CI environment, executing product checks")
+        logger.info("Running in CI environment, executing product checks...")
         asyncio.run(check_products_for_users())
     else:
         logger.info("Running in CircleCI or locally, starting Telegram polling")
@@ -385,7 +411,9 @@ def main():
         app.add_handler(CommandHandler("setpincode", set_pincode))
         app.add_handler(CommandHandler("setproducts", set_products))
         app.add_handler(CommandHandler("stop", stop))
-        app.run_polling(timeout=840)
+        logger.info("Ending Telegram bot polling...")
+        asyncio.run(end_polling(app))
+        logger.info("Telegram bot polling ended, exiting main function.")
 
 if __name__ == "__main__":
     main()
