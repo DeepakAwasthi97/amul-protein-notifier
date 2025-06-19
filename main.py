@@ -385,35 +385,72 @@ async def check_products_for_users():
         await send_telegram_notification_for_user(app, chat_id, pincode, products_to_check, product_status)
         logger.info("Finished checking products for chat_id %s", chat_id)
 
-async def end_polling(app):
-    """Manually start polling and stop after 15 minutes."""
+# async def end_polling(app):
+#     """Manually start polling and stop after 15 minutes."""
+#     await app.initialize()
+#     await app.start()
+#     await app.updater.start_polling()
+#     try:
+#         await asyncio.sleep(800)
+#     finally:
+#         await app.updater.stop()
+#         await app.stop()
+#         await app.shutdown()
+#         print("Bot stopped after preferred minutes.")
+
+# # Main function to run the bot or product checks
+# def main():
+#     logger.info("Starting main function")
+#     if os.getenv("GITHUB_ACTIONS"):
+#         logger.info("Running in CI environment, executing product checks...")
+#         asyncio.run(check_products_for_users())
+#     else:
+#         logger.info("Running in CircleCI or locally, starting Telegram polling")
+#         app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+#         app.add_handler(CommandHandler("start", start))
+#         app.add_handler(CommandHandler("setpincode", set_pincode))
+#         app.add_handler(CommandHandler("setproducts", set_products))
+#         app.add_handler(CommandHandler("stop", stop))
+#         logger.info("Starting Telegram bot polling...")
+#         asyncio.run(end_polling(app))
+#         logger.info("Telegram bot polling ended, exiting main function.")
+
+# if __name__ == "__main__":
+#     main()
+
+# Add this new polling + 15-min job logic
+async def run_polling_with_scheduled_notifications(app, run_duration_minutes=350):
     await app.initialize()
     await app.start()
     await app.updater.start_polling()
+
+    logger.info("Polling started. Running periodic product checks every 15 minutes.")
+    end_time = asyncio.get_event_loop().time() + (run_duration_minutes * 60)
+
     try:
-        await asyncio.sleep(800)
+        while asyncio.get_event_loop().time() < end_time:
+            logger.info("Running product check task...")
+            await check_products_for_users()
+            logger.info("Product check completed. Sleeping for 15 minutes...")
+            await asyncio.sleep(15 * 60)
     finally:
+        logger.info("Stopping polling after scheduled duration.")
         await app.updater.stop()
         await app.stop()
         await app.shutdown()
-        print("Bot stopped after preferred minutes.")
+        logger.info("Bot shutdown complete.")
 
-# Main function to run the bot or product checks
+
 def main():
     logger.info("Starting main function")
-    if os.getenv("GITHUB_ACTIONS"):
-        logger.info("Running in CI environment, executing product checks...")
-        asyncio.run(check_products_for_users())
-    else:
-        logger.info("Running in CircleCI or locally, starting Telegram polling")
-        app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("setpincode", set_pincode))
-        app.add_handler(CommandHandler("setproducts", set_products))
-        app.add_handler(CommandHandler("stop", stop))
-        logger.info("Starting Telegram bot polling...")
-        asyncio.run(end_polling(app))
-        logger.info("Telegram bot polling ended, exiting main function.")
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("setpincode", set_pincode))
+    app.add_handler(CommandHandler("setproducts", set_products))
+    app.add_handler(CommandHandler("stop", stop))
+
+    # Run polling if in GitHub Actions or locally
+    asyncio.run(run_polling_with_scheduled_notifications(app))
 
 if __name__ == "__main__":
     main()
