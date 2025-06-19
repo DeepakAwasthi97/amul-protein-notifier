@@ -1,4 +1,5 @@
 version: 2.1
+
 jobs:
   run-bot:
     docker:
@@ -9,7 +10,6 @@ jobs:
           name: Install Dependencies
           command: |
             pip install --user -r requirements.txt
-            # Install ChromeDriver if needed for Selenium
             sudo apt-get update
             sudo apt-get install -y chromium-chromedriver
       - run:
@@ -18,13 +18,29 @@ jobs:
             python main.py
       - store_artifacts:
           path: product_check.log
+
+  watchdog:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Wait and Cancel Pipeline if Needed
+          command: |
+            echo "Waiting for 10 minutes..."
+            sleep 600  # 600s = 10 mins
+            echo "Canceling workflow now..."
+            curl -X POST "https://circleci.com/api/v2/workflow/${CIRCLE_WORKFLOW_ID}/cancel" \
+              -H "Circle-Token: ${CIRCLECI_TOKEN}" \
+              -H "Content-Type: application/json"
+
 workflows:
   bot-workflow:
     jobs:
       - run-bot
+      - watchdog
     triggers:
       - schedule:
-          cron: "0,15,30,45 * * * *"  # Run every 15 minutes
+          cron: "0,15,30,45 * * * *"
           filters:
             branches:
               only: main
