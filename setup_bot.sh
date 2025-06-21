@@ -31,10 +31,12 @@ if ! command -v python3 >/dev/null 2>&1; then
     sudo apt install -y python3
 fi
 PYTHON_VERSION=$(python3 --version | cut -d' ' -f2)
-if [[ "${PYTHON_VERSION}" < "3.8" ]]; then
+IFS='.' read -r MAJOR MINOR PATCH <<< "${PYTHON_VERSION}"
+if [[ ${MAJOR} -lt 3 || (${MAJOR} -eq 3 && ${MINOR} -lt 8) ]]; then
     log "❌ Python 3.8 or higher required. Found: ${PYTHON_VERSION}"
     exit 1
 fi
+log "✅ Python version ${PYTHON_VERSION} is sufficient"
 
 log "🔧 Updating system packages..."
 sudo apt update && sudo apt upgrade -y
@@ -46,41 +48,70 @@ sudo apt install -y python3-pip python3-venv git screen curl wget unzip \
     libx11-xcb1 libxcomposite1 libxdamage1 libxrandr2 xdg-utils libgbm1 \
     libu2f-udev libpango-1.0-0 libcairo2
 
-log "🧩 Installing Google Chrome..."
-wget -O google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-sudo apt install -y ./google-chrome-stable_current_amd64.deb
-rm google-chrome-stable_current_amd64.deb
+# Check if Google Chrome is installed
+if ! command -v google-chrome >/dev/null 2>&1; then
+    log "🧩 Installing Google Chrome..."
+    wget -O google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    sudo apt install -y ./google-chrome-stable_current_amd64.deb
+    rm google-chrome-stable_current_amd64.deb
+else
+    log "✅ Google Chrome already installed"
+fi
 
-log "🧩 Installing ChromeDriver..."
-CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+')
-CHROMEDRIVER_URL="https://chromedriver.storage.googleapis.com/${CHROME_VERSION}/chromedriver_linux64.zip"
-wget -O chromedriver.zip "${CHROMEDRIVER_URL}" || {
-    log "❌ Failed to download ChromeDriver for Chrome version ${CHROME_VERSION}. Check version compatibility."
-    exit 1
-}
-unzip chromedriver.zip
-sudo mv chromedriver /usr/local/bin/
-sudo chmod +x /usr/local/bin/chromedriver
-rm chromedriver.zip
-log "✅ ChromeDriver installed for Chrome version ${CHROME_VERSION}"
+# Check if ChromeDriver is installed
+if ! command -v chromedriver >/dev/null 2>&1; then
+    log "🧩 Installing ChromeDriver..."
+    CHROME_VERSION=$(google-chrome --version | grep -oP '\d+\.\d+\.\d+\.\d+')
+    log "Detected Chrome version: ${CHROME_VERSION}"
+    CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${CHROME_VERSION}/linux64/chromedriver-linux64.zip"
+    log "Attempting to download ChromeDriver from: ${CHROMEDRIVER_URL}"
+    if ! wget -O chromedriver.zip "${CHROMEDRIVER_URL}"; then
+        log "⚠️ Failed to download ChromeDriver for version ${CHROME_VERSION}. Trying fallback version..."
+        FALLBACK_VERSION="137.0.7151.68"
+        CHROMEDRIVER_URL="https://storage.googleapis.com/chrome-for-testing-public/${FALLBACK_VERSION}/linux64/chromedriver-linux64.zip"
+        log "Attempting fallback download from: ${CHROMEDRIVER_URL}"
+        if ! wget -O chromedriver.zip "${CHROMEDRIVER_URL}"; then
+            log "❌ Failed to download ChromeDriver for fallback version ${FALLBACK_VERSION}. Check version compatibility."
+            exit 1
+        fi
+    fi
+    unzip chromedriver.zip chromedriver-linux64/chromedriver
+    sudo mv chromedriver-linux64/chromedriver /usr/local/bin/chromedriver
+    sudo chmod +x /usr/local/bin/chromedriver
+    rm -rf chromedriver.zip chromedriver-linux64
+    log "✅ ChromeDriver installed for Chrome version ${CHROME_VERSION}"
+else
+    log "✅ ChromeDriver already installed"
+fi
 
-log "🐍 Cloning bot repository..."
-git clone https://github.com/DeepakAwasthi97/amul-protein-notifier.git || {
-    log "❌ Failed to clone repository. Ensure it’s accessible (public or correct credentials)."
-    exit 1
-}
+# Check if repository exists
+if [[ ! -d amul-protein-notifier ]]; then
+    log "🐍 Cloning bot repository..."
+    git clone https://github.com/DeepakAwasthi97/amul-protein-notifier.git || {
+        log "❌ Failed to clone repository. Ensure it’s accessible (public or correct credentials)."
+        exit 1
+    }
+else
+    log "✅ Repository already cloned"
+fi
 cd amul-protein-notifier || {
     log "❌ Failed to enter repository directory."
     exit 1
 }
 
-log "📁 Setting up virtual environment..."
-python3 -m venv venv || {
-    log "❌ Failed to create virtual environment."
-    exit 1
-}
+# Check if virtual environment exists
+if [[ ! -d venv ]]; then
+    log "📁 Setting up virtual environment..."
+    python3 -m venv venv || {
+        log "❌ Failed to create virtual environment."
+        exit 1
+    }
+else
+    log "✅ Virtual environment already exists"
+fi
 source venv/bin/activate
 
+# Install Python dependencies
 log "📦 Installing Python dependencies..."
 pip install --upgrade pip
 if [[ ! -f requirements.txt ]]; then
@@ -92,15 +123,20 @@ pip install -r requirements.txt || {
     exit 1
 }
 
-log "🛡️ Creating .env file..."
-cat <<EOF > .env
+# Check if .env exists
+if [[ ! -f .env ]]; then
+    log "🛡️ Creating .env file..."
+    cat <<EOF > .env
 TELEGRAM_BOT_TOKEN=
 GH_PAT=
 PRIVATE_REPO=
 EOF
-chmod 600 .env  # Set secure permissions
-log "➡️ Please edit .env file now to insert your secrets:"
-nano .env
+    chmod 600 .env
+    log "➡️ Please edit .env file now to insert your secrets:"
+    nano .env
+else
+    log "✅ .env file already exists. Edit with 'nano .env' if needed."
+fi
 
 # Validate .env file
 if ! grep -q "^TELEGRAM_BOT_TOKEN=[^ ]" .env || ! grep -q "^PRIVATE_REPO=[^ ]" .env || ! grep -q "^GH_PAT=[^ ]" .env; then
