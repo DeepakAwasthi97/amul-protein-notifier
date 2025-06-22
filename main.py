@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 
 # Product list for inline keyboard
 PRODUCTS = [
-    "Any of the products from the list",
+    "Any",
     "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30",
     "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 8",
     "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 30",
@@ -42,6 +42,33 @@ PRODUCTS = [
     "Amul Chocolate Whey Protein, 34 g | Pack of 30 sachets",
     "Amul Chocolate Whey Protein, 34 g | Pack of 60 sachets"
 ]
+
+# Map full product names to short display names
+PRODUCT_NAME_MAP = {
+    "Any": "❗ Any of the products from the list",
+    "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30": "🍫 Chocolate Milkshake 180mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 8": "☕ Coffee Milkshake 180mL | Pack of 8",
+    "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 30": "☕ Coffee Milkshake 180mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 8": "🌸 Kesar Milkshake 180mL | Pack of 8",
+    "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 30": "🌸 Kesar Milkshake 180mL | Pack of 30",
+    "Amul High Protein Blueberry Shake, 200 mL | Pack of 30": "🫐 Blueberry Shake 200mL | Pack of 30",
+    "Amul High Protein Plain Lassi, 200 mL | Pack of 30": "🥛 Plain Lassi 200mL | Pack of 30",
+    "Amul High Protein Rose Lassi, 200 mL | Pack of 30": "🌹 Rose Lassi 200mL | Pack of 30",
+    "Amul High Protein Buttermilk, 200 mL | Pack of 30": "🥛 Buttermilk 200mL | Pack of 30",
+    "Amul High Protein Milk, 250 mL | Pack of 8": "🥛 Milk 250mL | Pack of 8",
+    "Amul High Protein Milk, 250 mL | Pack of 32": "🥛 Milk 250mL | Pack of 32",
+    "Amul High Protein Paneer, 400 g | Pack of 24": "🧀 Paneer 400g | Pack of 24",
+    "Amul High Protein Paneer, 400 g | Pack of 2": "🧀 Paneer 400g | Pack of 2",
+    "Amul Whey Protein Gift Pack, 32 g | Pack of 10 sachets": "💪 Whey Protein 32g | Pack of 10 sachets",
+    "Amul Whey Protein, 32 g | Pack of 30 Sachets": "💪 Whey Protein 32g | Pack of 30 Sachets",
+    "Amul Whey Protein Pack, 32 g | Pack of 60 Sachets": "💪 Whey Protein 32g | Pack of 60 Sachets",
+    "Amul Chocolate Whey Protein Gift Pack, 34 g | Pack of 10 sachets": "🍫 Chocolate Whey 34g | Pack of 10 sachets",
+    "Amul Chocolate Whey Protein, 34 g | Pack of 30 sachets": "🍫 Chocolate Whey 34g | Pack of 30 sachets",
+    "Amul Chocolate Whey Protein, 34 g | Pack of 60 sachets": "🍫 Chocolate Whey 34g | Pack of 60 sachets"
+}
+
+# Reverse map for internal use
+SHORT_TO_FULL = {v: k for k, v in PRODUCT_NAME_MAP.items()}
 
 # Setup masking for sensitive information
 def mask(value, visible=2):
@@ -203,14 +230,14 @@ async def set_products(update: Update, context: ContextTypes):
     keyboard = []
     for i, product in enumerate(PRODUCTS, 1):
         callback_data = f"product_{i}"
-        display_text = product if i != 1 else f"❗ 𝐀𝐧𝐲 𝐨𝐟 𝐭𝐡𝐞 𝐩𝐫𝐨𝐝𝐮𝐜𝐭𝐬 𝐟𝐫𝐨𝐦 𝐭𝐡𝐞 𝐥𝐢𝐬𝐭"
+        display_text = PRODUCT_NAME_MAP[product]
         selected = "✅ " if product in context.user_data["selected_products"] else ""
         keyboard.append([InlineKeyboardButton(f"{selected}{display_text}", callback_data=callback_data)])
     keyboard.append([InlineKeyboardButton("Confirm Selection", callback_data="confirm_products")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "Select products to receive notifications for (click 'Any' for all products, or select specific ones):\n"
-        "Use the buttons below to toggle selections, then press 'Confirm Selection'.",
+        "Select products to monitor (click 'Any of the products from the list' for all products):\n"
+        "Toggle selections, then press 'Confirm Selection'.",
         reply_markup=reply_markup
     )
 
@@ -223,7 +250,7 @@ async def product_callback(update: Update, context: ContextTypes):
         if query.data == "confirm_products":
             selected_products = context.user_data.get("selected_products", [])
             if not selected_products:
-                await query.message.reply_text("No products selected. Please select at least one product or 'Any'.")
+                await query.message.reply_text("No products selected. Please select at least one product or 'Any of the products from the list'.")
                 return
             users_data = read_users_file()
             users = users_data["users"]
@@ -234,9 +261,10 @@ async def product_callback(update: Update, context: ContextTypes):
             user["products"] = selected_products
             user["active"] = True
             if update_users_file(users_data):
-                display_products = ["Any of the products from the list" if p == "Any" else p for p in selected_products]
+                display_products = [PRODUCT_NAME_MAP[p] for p in selected_products]
                 await query.message.reply_text(
-                    f"Fantastic! You'll now get notifications for these products:\n" + "\n".join(f"- {p}" for p in display_products)
+                    f"You'll get notifications for:\n" + "\n".join(f"- {p}" for p in display_products),
+                    parse_mode="Markdown"
                 )
                 logger.info("User %s set products: %s", mask(chat_id), selected_products)
                 context.user_data.pop("selected_products", None)
@@ -248,7 +276,7 @@ async def product_callback(update: Update, context: ContextTypes):
             if index < 0 or index >= len(PRODUCTS):
                 logger.warning("Invalid product index %d for chat_id %s", index, mask(chat_id))
                 return
-            selected_product = "Any" if index == 0 else PRODUCTS[index]
+            selected_product = PRODUCTS[index]
             selected_products = context.user_data.get("selected_products", [])
             if selected_product == "Any":
                 if "Any" in selected_products:
@@ -271,8 +299,8 @@ async def product_callback(update: Update, context: ContextTypes):
             keyboard = []
             for i, product in enumerate(PRODUCTS, 1):
                 callback_data = f"product_{i}"
-                display_text = product if i != 1 else f"❗ 𝐀𝐧𝐲 𝐨𝐟 𝐭𝐡𝐞 𝐩𝐫𝐨𝐝𝐮𝐜𝐭𝐬 𝐟𝐫𝐨𝐦 𝐭𝐡𝐞 𝐥𝐢𝐬𝐭"
-                is_selected = product in selected_products or (product == PRODUCTS[0] and "Any" in selected_products)
+                display_text = PRODUCT_NAME_MAP[product]
+                is_selected = product in selected_products
                 selected = "✅ " if is_selected else ""
                 keyboard.append([InlineKeyboardButton(f"{selected}{display_text}", callback_data=callback_data)])
             keyboard.append([InlineKeyboardButton("Confirm Selection", callback_data="confirm_products")])
@@ -457,14 +485,15 @@ async def send_telegram_notification_for_user(app, chat_id, pincode, product_nam
         logger.info("In Stock products for 'Any' for chat_id %s: %s", mask(chat_id), in_stock_products)
         if not in_stock_products:
             message = f"None of the Amul Protein items are available for your PINCODE: {pincode}"
-            logger.info("All products Sold Out for chat_id %s, sending: %s", mask(chat_id), message)
+            logger.info("All products Sold Out for chat_id %s, sending: %s", mask(chat_id), mask(pincode))
             # await app.bot.send_message(chat_id=chat_id, text=message)
         else:
             message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
             for name, _ in in_stock_products:
-                message += f"- {name}\n"
+                short_name = PRODUCT_NAME_MAP.get(name, name)
+                message += f"- {short_name}\n"
             logger.info("Sending notification for chat_id %s: %s", mask(chat_id), message)
-            await app.bot.send_message(chat_id=chat_id, text=message)
+            await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
     else:
         in_stock_products = [(name, status) for name, status in products if status == "In Stock"]
         logger.info("In Stock products for specific list for chat_id %s: %s", mask(chat_id), in_stock_products)
@@ -472,9 +501,10 @@ async def send_telegram_notification_for_user(app, chat_id, pincode, product_nam
         if relevant_products:
             message = f"Available Amul Protein Products for PINCODE {pincode}:\n\n"
             for name, _ in relevant_products:
-                message += f"- {name}\n"
-            logger.info("Sending notification for chat_id %s: %s", mask(chat_id), mask)
-            await app.bot.send_message(chat_id=chat_id, text=message)
+                short_name = PRODUCT_NAME_MAP.get(name, name)
+                message += f"- {short_name}\n"
+            logger.info("Sending notification for chat_id %s: %s", mask(chat_id), message)
+            await app.bot.send_message(chat_id=chat_id, text=message, parse_mode="Markdown")
         else:
             logger.info("No 'In Stock' product to notify for chat_id %s", mask(chat_id))
 
@@ -499,7 +529,7 @@ async def check_products_for_users():
 async def run_polling_with_scheduled_notifications(app):
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+    await app.updater.start_polling(timeout=5)
     logger.info("Running product checks every 15 minutes")
     logger.info("Polling started")
     try:
