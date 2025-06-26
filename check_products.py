@@ -1,8 +1,8 @@
 import asyncio
-import shutil
 import os
 import time
 import signal
+import sys
 from telegram.ext import Application
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -11,7 +11,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from selenium_stealth import stealth
 from common import PRODUCTS, PRODUCT_NAME_MAP, TELEGRAM_BOT_TOKEN, setup_logging, mask, is_already_running, read_users_file
 
 logger = setup_logging()
@@ -27,10 +27,16 @@ def check_product_availability(pincode):
     options.add_argument("--headless")
     options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.7151.69 Safari/537.36")
     driver = None
-    user_data_dir = None
     try:
         logger.info("Initializing Chrome WebDriver...")
         driver = webdriver.Chrome(options=options)
+        stealth(driver,
+                languages=["en-US", "en"],
+                vendor="Google Inc.",
+                platform="Win32",
+                webgl_vendor="Intel Inc.",
+                renderer="Intel Iris OpenGL Engine",
+                fix_hairline=True)
         logger.info("Chrome WebDriver initialized successfully")
         driver.set_window_size(1920, 1080)
         logger.info("Navigating to URL: %s", url)
@@ -166,12 +172,6 @@ def check_product_availability(pincode):
                     logger.error("WebDriver quit timed out for pincode %s", mask(pincode))
             except Exception as e:
                 logger.warning("Error quitting driver for pincode %s: %s", mask(pincode), str(e))
-        if not os.getenv("GITHUB_ACTIONS") and user_data_dir and os.path.exists(user_data_dir):
-            try:
-                shutil.rmtree(user_data_dir)
-                logger.info("Cleaned up temporary user data directory: %s", user_data_dir)
-            except Exception as e:
-                logger.warning("Failed to clean up user data directory %s: %s", user_data_dir, str(e))
 
 async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
     try:
@@ -223,12 +223,10 @@ async def check_products_for_users():
         logger.info("No active users to check")
         return
 
-    # Initialize Telegram app once and keep it alive
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     await app.initialize()
     
     try:
-        # Group users by pincode
         pincode_groups = {}
         for user in active_users:
             pincode = user.get("pincode")
@@ -239,85 +237,75 @@ async def check_products_for_users():
                 pincode_groups[pincode] = []
             pincode_groups[pincode].append(user)
 
-        # Create semaphore to limit concurrent product checks
-        semaphore = asyncio.Semaphore(2)  # Limit to 2 concurrent checks
-        
-        async def process_single_pincode(pincode, users):
-            async with semaphore:
-                logger.info("Starting process for pincode %s with %d users", mask(pincode), len(users))
-                
-                # Run product check in thread pool
-                loop = asyncio.get_event_loop()
-                try:
-                    product_status = await loop.run_in_executor(
-                        None, check_product_availability, pincode
-                    )
-                    logger.info("Product check completed for pincode %s", mask(pincode))
-                    
-                    # Immediately send notifications for this pincode
-                    notification_tasks = []
-                    for user in users:
-                        chat_id = user.get("chat_id")
-                        products_to_check = user.get("products")
-                        logger.info("Creating notification task for chat_id %s, pincode %s", mask(chat_id), mask(pincode))
-                        
-                        task = asyncio.create_task(
-                            send_telegram_notification_for_user(
-                                app, chat_id, pincode, products_to_check, product_status
-                            )
-                        )
-                        notification_tasks.append(task)
-                    
-                    # Wait for all notifications for this pincode to complete
-                    if notification_tasks:
-                        await asyncio.gather(*notification_tasks, return_exceptions=True)
-                        logger.info("All notifications completed for pincode %s", mask(pincode))
-                    
-                except Exception as e:
-                    logger.error("Error processing pincode %s: %s", mask(pincode), str(e))
-                finally:
-                    logger.info("Finished processing pincode %s", mask(pincode))
+        semaphore = asyncio.Semaphore(3)
+        max_retries = 1  # Configurable number of retries
 
-        # Process all pincodes concurrently
-        tasks = [
-            asyncio.create_task(process_single_pincode(pincode, users))
-            for pincode, users in pincode_groups.items()
-        ]
-        
-        if tasks:
-            logger.info("Starting concurrent processing of %d pincodes", len(tasks))
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("All pincode processing completed")
-        
+        for attempt in range(max_retries + 1):
+            if not pincode_groups:
+                break
+            logger.info("Attempt %d: Checking %d pincodes", attempt + 1, len(pincode_groups))
+            
+            async def process_single_pincode(pincode, users):
+                async with semaphore:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        product_status = await loop.run_in_executor(None, check_product_availability, pincode)
+                        if product_status:  # Success if product_status is not empty
+                            notification_tasks = []
+                            for user in users:
+                                chat_id = user.get("chat_id")
+                                products_to_check = user.get("products")
+                                task = asyncio.create_task(
+                                    send_telegram_notification_for_user(
+                                        app, chat_id, pincode, products_to_check, product_status
+                                    )
+                                )
+                                notification_tasks.append(task)
+                            if notification_tasks:
+                                await asyncio.gather(*notification_tasks)
+                            return True
+                        else:
+                            logger.warning("Pincode %s check failed: empty product status", mask(pincode))
+                            return False
+                    except Exception as e:
+                        logger.error("Error processing pincode %s: %s", mask(pincode), str(e))
+                        return False
+
+            pincodes = list(pincode_groups.keys())
+            tasks = [asyncio.create_task(process_single_pincode(pincode, pincode_groups[pincode])) 
+                     for pincode in pincodes]
+            results = await asyncio.gather(*tasks)
+            failed_pincodes = [pincode for pincode, success in zip(pincodes, results) if not success]
+            
+            if not failed_pincodes:
+                break
+            if attempt < max_retries:
+                logger.info("Retrying failed pincodes: %s", [mask(p) for p in failed_pincodes])
+                pincode_groups = {pincode: pincode_groups[pincode] for pincode in failed_pincodes}
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+
+        if failed_pincodes:
+            logger.error("Some pincodes failed after %d attempts: %s", 
+                         max_retries + 1, [mask(p) for p in failed_pincodes])
+
     except Exception as e:
         logger.error("Error in main processing: %s", str(e))
         raise
     finally:
-        # Clean shutdown
-        logger.info("Shutting down application...")
-        try:
-            await app.shutdown()
-            logger.info("Application shutdown completed")
-        except Exception as e:
-            logger.error("Error shutting down application: %s", str(e))
-
-    logger.info("Completed product check for all users")
+        await app.shutdown()
+        logger.info("Application shutdown completed")
 
 def main():
-    # Fix Windows console encoding for emoji support
-    import sys
+    start_time = time.time()
     if sys.platform == "win32":
         try:
-            # Try to set console to UTF-8
-            import os
             os.system("chcp 65001 >nul 2>&1")
-            # Set stdout encoding
             if hasattr(sys.stdout, 'reconfigure'):
                 sys.stdout.reconfigure(encoding='utf-8')
             if hasattr(sys.stderr, 'reconfigure'):
                 sys.stderr.reconfigure(encoding='utf-8')
         except Exception:
-            pass  # Fallback silently if encoding setup fails
+            pass
     
     logger.info("Starting product check script")
     
@@ -332,9 +320,11 @@ def main():
         if is_already_running("check_products.py"):
             logger.error("Another instance of check_products.py is already running. Exiting...")
             raise SystemExit(1)
-        
         asyncio.run(check_products_for_users())
-        
+        total_time = time.time() - start_time
+        minutes, seconds = divmod(total_time, 60)
+        logger.info(f"Total execution time: {int(minutes)} minutes {seconds:.2f} seconds")
+        print(f"Total execution time: {int(minutes)} minutes {seconds:.2f} seconds")
     except KeyboardInterrupt:
         logger.info("Main process interrupted, exiting cleanly...")
         raise SystemExit(0)
@@ -343,4 +333,5 @@ def main():
         raise SystemExit(1)
 
 if __name__ == "__main__":
+    logger.info("Script execution started")
     main()
