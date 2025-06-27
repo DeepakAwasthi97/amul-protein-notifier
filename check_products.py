@@ -12,10 +12,26 @@ from selenium.common.exceptions import TimeoutException, StaleElementReferenceEx
 from selenium.webdriver.chrome.options import Options
 from bs4 import BeautifulSoup
 from selenium_stealth import stealth
-from common import PRODUCTS, PRODUCT_NAME_MAP, TELEGRAM_BOT_TOKEN, setup_logging, mask, is_already_running, read_users_file
+from common import PRODUCT_NAME_MAP, setup_logging, mask, is_already_running, read_users_file
+from config import TELEGRAM_BOT_TOKEN, SEMAPHORE_LIMIT, MAX_RETRIES
+from threading import Thread
 
 logger = setup_logging()
 pincode_cache = {}
+
+def _quit_driver_with_timeout(driver, pincode, timeout=5):
+    """Attempt to quit the driver gracefully with a timeout."""
+    try:
+        t = Thread(target=driver.quit)
+        t.start()
+        t.join(timeout=timeout)
+        if t.is_alive():
+            logger.error("WebDriver quit timed out for pincode %s", mask(pincode))
+    except Exception as e:
+        logger.warning(
+            "Error quitting driver for pincode %s: %s", mask(pincode), str(e)
+        )
+
 
 def check_product_availability(pincode):
     global pincode_cache
@@ -161,17 +177,7 @@ def check_product_availability(pincode):
     finally:
         if driver:
             logger.info("Closing WebDriver for pincode %s", mask(pincode))
-            try:
-                def quit_driver():
-                    driver.quit()
-                from threading import Thread
-                t = Thread(target=quit_driver)
-                t.start()
-                t.join(timeout=5)
-                if t.is_alive():
-                    logger.error("WebDriver quit timed out for pincode %s", mask(pincode))
-            except Exception as e:
-                logger.warning("Error quitting driver for pincode %s: %s", mask(pincode), str(e))
+            _quit_driver_with_timeout(driver, pincode)
 
 async def send_telegram_notification_for_user(app, chat_id, pincode, product_names, products):
     try:
@@ -225,6 +231,9 @@ async def check_products_for_users():
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     await app.initialize()
+
+    successful_pincodes = set()
+    unsuccessful_pincodes = set()
     
     try:
         pincode_groups = {}
@@ -237,14 +246,17 @@ async def check_products_for_users():
                 pincode_groups[pincode] = []
             pincode_groups[pincode].append(user)
 
-        semaphore = asyncio.Semaphore(3)
-        max_retries = 1  # Configurable number of retries
+        semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+        max_retries = MAX_RETRIES
 
         for attempt in range(max_retries + 1):
             if not pincode_groups:
                 break
-            logger.info("Attempt %d: Checking %d pincodes", attempt + 1, len(pincode_groups))
+            logger.info("Attempt %d/%d: Checking %d pincodes", attempt + 1, max_retries + 1, len(pincode_groups))
             
+            current_attempt_successful_pincodes = []
+            current_attempt_failed_pincodes = []
+
             async def process_single_pincode(pincode, users):
                 async with semaphore:
                     try:
@@ -263,30 +275,45 @@ async def check_products_for_users():
                                 notification_tasks.append(task)
                             if notification_tasks:
                                 await asyncio.gather(*notification_tasks)
+                            current_attempt_successful_pincodes.append(pincode)
                             return True
                         else:
                             logger.warning("Pincode %s check failed: empty product status", mask(pincode))
+                            current_attempt_failed_pincodes.append(pincode)
                             return False
                     except Exception as e:
                         logger.error("Error processing pincode %s: %s", mask(pincode), str(e))
+                        current_attempt_failed_pincodes.append(pincode)
                         return False
 
             pincodes = list(pincode_groups.keys())
             tasks = [asyncio.create_task(process_single_pincode(pincode, pincode_groups[pincode])) 
                      for pincode in pincodes]
             results = await asyncio.gather(*tasks)
-            failed_pincodes = [pincode for pincode, success in zip(pincodes, results) if not success]
             
-            if not failed_pincodes:
+            # Update overall successful and unsuccessful lists
+            for pincode, success in zip(pincodes, results):
+                if success:
+                    successful_pincodes.add(pincode)
+                else:
+                    unsuccessful_pincodes.add(pincode)
+
+            failed_pincodes_in_attempt = [pincode for pincode, success in zip(pincodes, results) if not success]
+            
+            if not failed_pincodes_in_attempt:
+                logger.info("All pincodes processed successfully in attempt %d.", attempt + 1)
                 break
             if attempt < max_retries:
-                logger.info("Retrying failed pincodes: %s", [mask(p) for p in failed_pincodes])
-                pincode_groups = {pincode: pincode_groups[pincode] for pincode in failed_pincodes}
+                logger.info("Attempt %d: Retrying %d failed pincodes: %s", attempt + 1, len(failed_pincodes_in_attempt), [mask(p) for p in failed_pincodes_in_attempt])
+                pincode_groups = {pincode: pincode_groups[pincode] for pincode in failed_pincodes_in_attempt}
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                logger.info("Max retries reached. Remaining failed pincodes: %s", [mask(p) for p in failed_pincodes_in_attempt])
 
-        if failed_pincodes:
-            logger.error("Some pincodes failed after %d attempts: %s", 
-                         max_retries + 1, [mask(p) for p in failed_pincodes])
+        logger.info("--- Final Pincode Check Summary ---")
+        logger.info("Total pincodes checked: %d", len(successful_pincodes) + len(unsuccessful_pincodes))
+        logger.info("Successfully checked pincodes: %d -> %s", len(successful_pincodes), [mask(p) for p in sorted(list(successful_pincodes))])
+        logger.info("Unsuccessfully checked pincodes (after all retries): %d -> %s", len(unsuccessful_pincodes), [mask(p) for p in sorted(list(unsuccessful_pincodes))])
 
     except Exception as e:
         logger.error("Error in main processing: %s", str(e))

@@ -4,14 +4,14 @@ import logging
 import os
 import psutil
 import requests
-from dotenv import load_dotenv
 
-# Environment setup
-load_dotenv()
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-GH_PAT = os.getenv("GH_PAT")
-PRIVATE_REPO = os.getenv("PRIVATE_REPO")
-GITHUB_BRANCH = "main"
+from config import (
+    LOG_FILE,
+    USERS_FILE,
+    PRIVATE_REPO,
+    GITHUB_BRANCH,
+    GH_PAT,
+)
 
 # Constants
 PRODUCTS = [
@@ -21,6 +21,8 @@ PRODUCTS = [
     "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 30",
     "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 8",
     "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Vanilla, 180 mL | Pack of 8",
+    "Amul Kool Protein Milkshake | Vanilla, 180 mL | Pack of 30",
     "Amul High Protein Blueberry Shake, 200 mL | Pack of 30",
     "Amul High Protein Plain Lassi, 200 mL | Pack of 30",
     "Amul High Protein Rose Lassi, 200 mL | Pack of 30",
@@ -39,25 +41,27 @@ PRODUCTS = [
 
 PRODUCT_NAME_MAP = {
     "Any": "❗ Any of the products from the list",
-    "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30": "🍫 Chocolate Milkshake 180mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Chocolate, 180 mL | Pack of 30": "🍫🍫Chocolate Milkshake 180mL | Pack of 30",
     "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 8": "☕ Coffee Milkshake 180mL | Pack of 8",
-    "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 30": "☕ Coffee Milkshake 180mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Arabica Coffee, 180 mL | Pack of 30": "☕☕ Coffee Milkshake 180mL | Pack of 30",
     "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 8": "🌸 Kesar Milkshake 180mL | Pack of 8",
-    "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 30": "🌸 Kesar Milkshake 180mL | Pack of 30",
-    "Amul High Protein Blueberry Shake, 200 mL | Pack of 30": "🫐 Blueberry Shake 200mL | Pack of 30",
-    "Amul High Protein Plain Lassi, 200 mL | Pack of 30": "🥛 Plain Lassi 200mL | Pack of 30",
-    "Amul High Protein Rose Lassi, 200 mL | Pack of 30": "🌹 Rose Lassi 200mL | Pack of 30",
-    "Amul High Protein Buttermilk, 200 mL | Pack of 30": "🥛 Buttermilk 200mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Kesar, 180 mL | Pack of 30": "🌸🌸 Kesar Milkshake 180mL | Pack of 30",
+    "Amul Kool Protein Milkshake | Vanilla, 180 mL | Pack of 8": "🍨 Vanilla Milkshake 180mL | Pack of 8",
+    "Amul Kool Protein Milkshake | Vanilla, 180 mL | Pack of 30": "🍨🍨 Vanilla Milkshake 180mL | Pack of 30",
+    "Amul High Protein Blueberry Shake, 200 mL | Pack of 30": "🫐🫐 Blueberry Shake 200mL | Pack of 30",
+    "Amul High Protein Plain Lassi, 200 mL | Pack of 30": "🥛🥛 Plain Lassi 200mL | Pack of 30",
+    "Amul High Protein Rose Lassi, 200 mL | Pack of 30": "🌹🌹 Rose Lassi 200mL | Pack of 30",
+    "Amul High Protein Buttermilk, 200 mL | Pack of 30": "🥛🥛 Buttermilk 200mL | Pack of 30",
     "Amul High Protein Milk, 250 mL | Pack of 8": "🥛 Milk 250mL | Pack of 8",
-    "Amul High Protein Milk, 250 mL | Pack of 32": "🥛 Milk 250mL | Pack of 32",
-    "Amul High Protein Paneer, 400 g | Pack of 24": "🧀 Paneer 400g | Pack of 24",
+    "Amul High Protein Milk, 250 mL | Pack of 32": "🥛🥛 Milk 250mL | Pack of 32",
+    "Amul High Protein Paneer, 400 g | Pack of 24": "🧀🧀 Paneer 400g | Pack of 24",
     "Amul High Protein Paneer, 400 g | Pack of 2": "🧀 Paneer 400g | Pack of 2",
     "Amul Whey Protein Gift Pack, 32 g | Pack of 10 sachets": "💪 Whey Protein 32g | Pack of 10 sachets",
-    "Amul Whey Protein, 32 g | Pack of 30 Sachets": "💪 Whey Protein 32g | Pack of 30 Sachets",
-    "Amul Whey Protein Pack, 32 g | Pack of 60 Sachets": "💪 Whey Protein 32g | Pack of 60 Sachets",
+    "Amul Whey Protein, 32 g | Pack of 30 Sachets": "💪💪 Whey Protein 32g | Pack of 30 Sachets",
+    "Amul Whey Protein Pack, 32 g | Pack of 60 Sachets": "💪💪💪 Whey Protein 32g | Pack of 60 Sachets",
     "Amul Chocolate Whey Protein Gift Pack, 34 g | Pack of 10 sachets": "🍫 Chocolate Whey 34g | Pack of 10 sachets",
-    "Amul Chocolate Whey Protein, 34 g | Pack of 30 sachets": "🍫 Chocolate Whey 34g | Pack of 30 sachets",
-    "Amul Chocolate Whey Protein, 34 g | Pack of 60 sachets": "🍫 Chocolate Whey 34g | Pack of 60 sachets",
+    "Amul Chocolate Whey Protein, 34 g | Pack of 30 sachets": "🍫🍫 Chocolate Whey 34g | Pack of 30 sachets",
+    "Amul Chocolate Whey Protein, 34 g | Pack of 60 sachets": "🍫🍫🍫 Chocolate Whey 34g | Pack of 60 sachets",
 }
 
 SHORT_TO_FULL = {v: k for k, v in PRODUCT_NAME_MAP.items()}
@@ -69,7 +73,7 @@ def setup_logging():
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler("product_check.log"),
+            logging.FileHandler(LOG_FILE),
         ],
     )
     return logging.getLogger(__name__)
@@ -125,7 +129,7 @@ def get_file_sha(path):
 
 def read_users_file():
     logger = logging.getLogger(__name__)
-    url = f"https://api.github.com/repos/{PRIVATE_REPO}/contents/users.json?ref={GITHUB_BRANCH}"
+    url = f"https://api.github.com/repos/{PRIVATE_REPO}/contents/{USERS_FILE}?ref={GITHUB_BRANCH}"
     headers = {
         "Authorization": f"token {GH_PAT}",
         "Accept": "application/vnd.github+json",
