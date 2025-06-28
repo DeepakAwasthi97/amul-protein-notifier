@@ -222,7 +222,7 @@ async def check_products_for_users():
     global pincode_cache
     pincode_cache.clear()
     logger.info("Pincode cache cleared")
-    
+
     users_data = read_users_file()
     active_users = [u for u in users_data["users"] if u.get("active", False)]
     if not active_users:
@@ -233,8 +233,7 @@ async def check_products_for_users():
     await app.initialize()
 
     successful_pincodes = set()
-    unsuccessful_pincodes = set()
-    
+
     try:
         pincode_groups = {}
         for user in active_users:
@@ -246,6 +245,7 @@ async def check_products_for_users():
                 pincode_groups[pincode] = []
             pincode_groups[pincode].append(user)
 
+        initial_pincodes = set(pincode_groups.keys())
         semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
         max_retries = MAX_RETRIES
 
@@ -253,9 +253,6 @@ async def check_products_for_users():
             if not pincode_groups:
                 break
             logger.info("Attempt %d/%d: Checking %d pincodes", attempt + 1, max_retries + 1, len(pincode_groups))
-            
-            current_attempt_successful_pincodes = []
-            current_attempt_failed_pincodes = []
 
             async def process_single_pincode(pincode, users):
                 async with semaphore:
@@ -275,31 +272,25 @@ async def check_products_for_users():
                                 notification_tasks.append(task)
                             if notification_tasks:
                                 await asyncio.gather(*notification_tasks)
-                            current_attempt_successful_pincodes.append(pincode)
                             return True
                         else:
                             logger.warning("Pincode %s check failed: empty product status", mask(pincode))
-                            current_attempt_failed_pincodes.append(pincode)
                             return False
                     except Exception as e:
                         logger.error("Error processing pincode %s: %s", mask(pincode), str(e))
-                        current_attempt_failed_pincodes.append(pincode)
                         return False
 
             pincodes = list(pincode_groups.keys())
-            tasks = [asyncio.create_task(process_single_pincode(pincode, pincode_groups[pincode])) 
+            tasks = [asyncio.create_task(process_single_pincode(pincode, pincode_groups[pincode]))
                      for pincode in pincodes]
             results = await asyncio.gather(*tasks)
-            
-            # Update overall successful and unsuccessful lists
+
             for pincode, success in zip(pincodes, results):
                 if success:
                     successful_pincodes.add(pincode)
-                else:
-                    unsuccessful_pincodes.add(pincode)
 
             failed_pincodes_in_attempt = [pincode for pincode, success in zip(pincodes, results) if not success]
-            
+
             if not failed_pincodes_in_attempt:
                 logger.info("All pincodes processed successfully in attempt %d.", attempt + 1)
                 break
@@ -310,8 +301,9 @@ async def check_products_for_users():
             else:
                 logger.info("Max retries reached. Remaining failed pincodes: %s", [mask(p) for p in failed_pincodes_in_attempt])
 
+        unsuccessful_pincodes = initial_pincodes - successful_pincodes
         logger.info("--- Final Pincode Check Summary ---")
-        logger.info("Total pincodes checked: %d", len(successful_pincodes) + len(unsuccessful_pincodes))
+        logger.info("Total pincodes checked: %d", len(initial_pincodes))
         logger.info("Successfully checked pincodes: %d -> %s", len(successful_pincodes), [mask(p) for p in sorted(list(successful_pincodes))])
         logger.info("Unsuccessfully checked pincodes (after all retries): %d -> %s", len(unsuccessful_pincodes), [mask(p) for p in sorted(list(unsuccessful_pincodes))])
 
